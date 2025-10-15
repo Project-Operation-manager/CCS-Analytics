@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Priority Tasks</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#f5f7fb; --panel:#fff; --ink:#0B1220; --muted:#475569;
+    --radius:12px; --grid-strong:#94A3B8;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:14px/1.35 Inter,system-ui,Segoe UI,Arial;overflow:hidden}
+  header{padding:10px 14px 4px} header h2{margin:0;font-weight:700}
+
+  .wrap{height:100vh;display:flex;flex-direction:column}
+  .card{margin:10px 14px 14px;background:#fff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+  .top{padding:12px;border-bottom:1px solid #e5e7eb;background:#f8fafc;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .btn-pill{appearance:none;border:none;cursor:pointer;padding:6px 12px;border-radius:999px;color:#fff;font-weight:600;font-size:12px;background:linear-gradient(180deg,#6F4CF6 0%,#5B32E5 100%);box-shadow:0 3px 7px rgba(109,40,217,.30), inset 0 1px 0 rgba(255,255,255,.35);display:inline-flex;align-items:center;gap:6px}
+  .chip-mini{background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE;padding:4px 8px;border-radius:999px;max-width:230px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;font-size:12px}
+  .tiny{font-size:12px;color:#64748b} .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+  .filters{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .filters .group{display:flex;align-items:center;gap:6px}
+  .filters label{font-size:12px;color:#334155;font-weight:700}
+  .filters select,.filters input[type="date"]{height:30px;padding:0 8px;border:1px solid #e5e7eb;border-radius:8px}
+
+  .scroll{flex:1;min-height:0;overflow:auto}
+  table[data-resizable="true"]{width:max-content;table-layout:auto;border-collapse:separate;border-spacing:0}
+  thead th, tbody td{white-space:nowrap}
+  thead th{position:sticky;top:0;background:#0b1220;color:#fff;font-weight:700;text-align:left;font-size:12px;padding:10px;border-bottom:1px solid #0b1220;padding-right:16px}
+  tbody td{padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;font-size:13px}
+  tbody tr:nth-child(odd){background:#fafafa}
+  .col-resizer{position:absolute;top:0;right:0;width:8px;height:100%;cursor:col-resize;user-select:none}
+  .col-resizer:after{content:'';position:absolute;top:15%;bottom:15%;right:3px;width:2px;background:rgba(255,255,255,.35)}
+  .dueBadge{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:8px;font-size:12px;font-weight:700;border:1px solid transparent}
+  .dueMissed{background:#ef4444;color:#fff;border-color:#b91c1c}
+  .dueToday{background:#f59e0b;color:#111827;border-color:#d97706}
+  .dueUpcoming{background:#3b82f6;color:#fff;border-color:#2563eb}
+</style>
+</head>
+<body>
+<header><h2>Priority tasks</h2></header>
+<div class="wrap">
+  <div class="card">
+    <div class="top">
+      <div class="tiny">Today: <span id="today" class="mono"></span></div>
+      <input id="file" type="file" accept=".xlsm,.xlsx,.xls,.csv" style="display:none"/>
+      <button id="choose" class="btn-pill">＋ Upload File</button>
+      <span id="fname" class="chip-mini"></span>
+      <button id="build" class="btn-pill">＋ Build</button>
+
+      <div class="filters">
+        <div class="group">
+          <label for="fTeam">Team</label>
+          <select id="fTeam"><option value="__ALL__">All teams</option></select>
+        </div>
+        <div class="group">
+          <label>Date window</label>
+          <span><input type="radio" name="dw" value="15" id="dw15" checked><label for="dw15">±15d</label></span>
+          <span><input type="radio" name="dw" value="7" id="dw7"><label for="dw7">±7d</label></span>
+          <span><input type="radio" name="dw" value="custom" id="dwc"><label for="dwc">Custom</label></span>
+          <input type="date" id="from" disabled>
+          <span>to</span>
+          <input type="date" id="to" disabled>
+        </div>
+      </div>
+
+      <button id="apply" class="btn-pill">↻ Apply</button>
+      <button id="export" class="btn-pill">⬇ Export (.xlsx)</button>
+      <button id="autosize" class="btn-pill" title="Autosize columns">↔ Autosize</button>
+      <button id="resetW" class="btn-pill" title="Reset column widths">⟲ Reset widths</button>
+
+      <div class="tiny" id="rangeLabel"></div>
+    </div>
+
+    <div class="scroll">
+      <table id="prioTable" data-resizable="true" aria-label="Priority table">
+        <thead>
+          <tr>
+            <th class="nowrap">Project code</th>
+            <th>Project name</th>
+            <th class="nowrap">Date</th>
+            <th>Team</th>
+            <th>Deployment</th>
+            <th class="nowrap">Task (stage)</th>
+          </tr>
+        </thead>
+        <tbody id="tbody">
+          <tr><td colspan="6" style="padding:16px" class="tiny">Upload and build a workbook, then Apply.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- Config ---------- */
+const PAST=15, FUTURE=15;  // for classification only (missed/today/upcoming as per window choice)
+
+/* ---------- Utils & Globals ---------- */
+const $=s=>document.querySelector(s);
+const clean=s=>String(s??'').replace(/[\u200B-\u200D\uFEFF]/g,'').replace(/\u00A0/g,' ').replace(/[\r\n]+/g,' ').replace(/\s+/g,' ').trim();
+const keyFromName=s=>clean(s).toLowerCase();
+const MONTH_IDX={JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
+const STAGES=['PD','CD1','CD2','CD3','CD4','CD5','SD1','SD2','SD3','SD4','SD5','MC','AD','DD1','DD2','DD3','DD4','DD5','TD1','TD2','TD3','TD4','TD5','WD20','WD40','WD60','WD80','WD100','DC','CO'];
+
+let viewProjects=[];
+
+function localTodayISO(){ const d=new Date(); const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${dd}`; }
+function addDays(iso, d){ const x=new Date(iso); x.setDate(x.getDate()+d); const y=x.getFullYear(), m=String(x.getMonth()+1).padStart(2,'0'), dd=String(x.getDate()).padStart(2,'0'); return `${y}-${m}-${dd}`; }
+function daysDiff(aISO,bISO){ const a=new Date(aISO), b=new Date(bISO); return Math.round((a.setHours(0,0,0,0)-b.setHours(0,0,0,0))/86400000); }
+function humanDate(iso){ if(!iso) return '—'; const d=new Date(iso); if(isNaN(d)) return iso; const dd=String(d.getDate()).padStart(2,'0'), mon=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]; return `${dd} ${mon} ${d.getFullYear()}`;}
+function toDMY(iso){ const d=new Date(iso); if(isNaN(d)) return iso||''; const dd=String(d.getDate()).padStart(2,'0'); const mm=String(d.getMonth()+1).padStart(2,'0'); return `${dd}/${mm}/${d.getFullYear()}`; }
+
+function asISO(d){ if(!(d instanceof Date)||isNaN(d))return ""; const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${dd}`; }
+function excelSerialToDate(n,is1904=false){ if(typeof n!=="number"||!isFinite(n))return null; if(is1904){const d=new Date(1904,0,1); d.setDate(d.getDate()+n); return d;} const epoch=new Date(1899,11,31); const offset=n>=60?n-1:n; const d=new Date(epoch); d.setDate(d.getDate()+offset); return d; }
+
+$('#today').textContent = localTodayISO();
+
+/* Upload/build */
+$('#choose').onclick=()=>$('#file').click();
+$('#file').onchange=()=>{const f=$('#file').files?.[0]; $('#fname').textContent=f?f.name:''; $('#fname').title=f?f.name:'';};
+$('#build').onclick=buildFromFile;
+$('#apply').onclick=renderTable;
+$('#export').onclick=exportTable;
+
+document.querySelectorAll('input[name="dw"]').forEach(r=>r.addEventListener('change', ()=>{
+  const custom = r.value==='custom' && r.checked;
+  $('#from').disabled = !custom; $('#to').disabled = !custom;
+  if(custom && !$('#from').value){ const t=localTodayISO(); $('#from').value=t; $('#to').value=t; }
+  renderTable();
+}));
+$('#from').addEventListener('change', renderTable);
+$('#to').addEventListener('change', renderTable);
+
+function getDateWindow(){
+  const t = localTodayISO();
+  const sel = document.querySelector('input[name="dw"]:checked')?.value || '15';
+  if(sel==='15') return {from:addDays(t,-15), to:addDays(t,+15), label:'±15d'};
+  if(sel==='7')  return {from:addDays(t,-7),  to:addDays(t,+7),  label:'±7d'};
+  const from = $('#from').value || t, to=$('#to').value || t;
+  return {from, to, label:`${from} → ${to}`};
+}
+
+/* XLSX parsing */
+async function readWorkbook(file){
+  const wb=await new Promise((res,rej)=>{
+    const fr=new FileReader();
+    fr.onload=e=>{try{res(XLSX.read(e.target.result,{type:'array'}));}catch(err){rej(err)}};
+    fr.onerror=()=>rej(new Error('read fail'));
+    fr.readAsArrayBuffer(file);
+  });
+  window.__DATE1904__ = !!(wb?.Workbook?.WBProps?.date1904);
+  const all=[]; for(const name of wb.SheetNames){
+    const ws=wb.Sheets[name]; if(!ws||!ws['!ref']) continue;
+    const aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,blankrows:false});
+    all.push({name,aoa});
+  } return all;
+}
+function parseDate(v){
+  if(v==null||v==="") return "";
+  if(v instanceof Date && !isNaN(v)) return asISO(v);
+  if(typeof v === "number"){
+    if(XLSX?.SSF?.parse_date_code){
+      const dc=XLSX.SSF.parse_date_code(v,{date1904:!!window.__DATE1904__});
+      if(dc && dc.y && dc.m && dc.d) return asISO(new Date(dc.y, dc.m-1, dc.d));
+    }
+    const d=excelSerialToDate(v,!!window.__DATE1904__); return d?asISO(d):"";
+  }
+  let s=String(v).trim(); if(!s) return "";
+  s=s.replace(/\s+\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?$/i," ").trim();
+  let m=s.match(/^(\d{1,2})[-\/\s]([A-Za-z]{3,})[-\/\s](\d{2,4})$/);
+  if(m){const d=+m[1],mon=MONTH_IDX[m[2].slice(0,3).toUpperCase()]; if(mon!=null){ let y=+m[3]; if(y<100) y+=(y>=70?1900:2000); return asISO(new Date(y,mon,d)); } }
+  m=s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})$/);
+  if(m){let y=+m[3]; if(y<100) y+=(y>=70?1900:2000); return asISO(new Date(y,+m[2]-1,+m[1]));}
+  m=s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+  if(m){ return asISO(new Date(+m[1],+m[2]-1,+m[3])); }
+  return "";
+}
+function ingestSheet(aoa,sheetName,log){
+  const out=[];
+  const findRow=(label)=>{
+    const tgt=String(label).toLowerCase().replace(/\s+/g,'');
+    for(let r=0;r<aoa.length;r++){
+      if(String(aoa[r]?.[0]??'').toLowerCase().replace(/\s+/g,'')===tgt) return r;
+    }
+    return -1;
+  };
+  const rCode=findRow('Project Code'),
+        rName=findRow('Project Name'),
+        rTeam=findRow('Team'),
+        rSOW=findRow('Scope of work'),
+        rStat=findRow('Project status'),
+        rCurr=findRow('Current stage'),
+        rTL=findRow('TIMELINE'),
+        rDep=findRow('DEPLOYMENT');
+  if(rTL<0||rName<0){ log?.(`  ⚠ Missing TIMELINE or Project Name`); return out; }
+
+  function detectBlocks(rTL){
+    const has=(cell,kw)=>String(cell||'').toLowerCase().includes(kw);
+    for(let r=rTL-3;r<=rTL+3;r++){
+      if(r<0||r>=aoa.length) continue;
+      const row=aoa[r]||[]; const bases=[];
+      for(let c=1;c<row.length-3;c++){
+        const ok=has(row[c],'start')&&(has(row[c+1],'end')||has(row[c+1],'finish'))&&has(row[c+2],'alloc')&&(has(row[c+3],'consum')||has(row[c+3],'spent'));
+        if(ok) bases.push(c);
+      }
+      if(bases.length) return {bases,headerRow:r};
+    }
+    return {bases:[],headerRow:-1};
+  }
+  const {bases}=detectBlocks(rTL); if(!bases.length){ log?.('⚠ TIMELINE header not found'); return out; }
+
+  const firstNonEmpty=arr=>{for(const v of arr){ if(v!==undefined&&v!==null&&String(v).trim()!=='') return String(v).trim(); } return ''; };
+  const rHours=findRow('HOURS'); const rHoursData=(rHours>=0&&rHours+1<aoa.length)?rHours+1:-1;
+
+  const projects=bases.map((c,idx)=>{
+    const name=clean(firstNonEmpty([aoa[rName]?.[c],aoa[rName]?.[c+1],aoa[rName]?.[c+2],aoa[rName]?.[c+3]])||`(Unnamed ${idx+1})`);
+    const code=firstNonEmpty([aoa[rCode]?.[c],aoa[rCode]?.[c+1],aoa[rCode]?.[c+2],aoa[rCode]?.[c+3]]);
+    const team=clean((rTeam>=0?firstNonEmpty([aoa[rTeam]?.[c],aoa[rTeam]?.[c+1],aoa[rTeam]?.[c+2],aoa[rTeam]?.[c+3]]):'')||sheetName||'');
+    const sow=firstNonEmpty([aoa[rSOW]?.[c],aoa[rSOW]?.[c+1],aoa[rSOW]?.[c+2],aoa[rSOW]?.[c+3]]);
+    const status=firstNonEmpty([aoa[rStat]?.[c],aoa[rStat]?.[c+1],aoa[rStat]?.[c+2],aoa[rStat]?.[c+3]]);
+    const currentRaw=firstNonEmpty([aoa[rCurr]?.[c],aoa[rCurr]?.[c+1],aoa[rCurr]?.[c+2],aoa[rCurr]?.[c+3]]);
+    const currentStage=String(currentRaw||'').split(/[,;&]+/).map(s=>String(s).toUpperCase().replace(/[^A-Z0-9]/g,'')).filter(Boolean).pop()||'';
+    let est,spent,bal,toFinish; const n=v=>{if(v==null||v==='')return NaN; const x=parseFloat(String(v).replace(/,/g,'')); return Number.isFinite(x)?x:NaN;};
+    if(rHoursData>=0){ est=n(aoa[rHoursData]?.[c]); spent=n(aoa[rHoursData]?.[c+1]); bal=n(aoa[rHoursData]?.[c+2]); toFinish=n(aoa[rHoursData]?.[c+3]); }
+
+    let resources=[]; if(rDep>=0){
+      const depHeader=aoa[rDep]||[]; let nameOff=0,pctOff=1;
+      for(let k=0;k<4;k++){ const h=String(depHeader[c+k]||'').toLowerCase(); if(h.includes('name')) nameOff=k; if(h.includes('%')||h.includes('percent')) pctOff=k; }
+      for(let rr=rDep+1; rr<aoa.length; rr++){
+        const lab=String(aoa[rr]?.[0]||'').trim(); if(!lab||!/^(deployment)\s*\d+/i.test(lab)) break;
+        const nm=clean(aoa[rr]?.[c+nameOff]||''); const pctRaw=aoa[rr]?.[c+pctOff];
+        const pct=(()=>{const nn=parseInt(String(pctRaw??'').replace(/[^0-9]/g,''),10); return Number.isFinite(nn)?nn:undefined;})();
+        if(nm||pct!==undefined) resources.push({name:nm,pct});
+      }
+    }
+    return {c0:c,name,code:clean(code),team,sow,status,currentStage, hours:{est,spent,bal,toFinish}, resources};
+  });
+
+  const start=rTL+1; let end=aoa.length; const rDep2=findRow('DEPLOYMENT'); let rTotal=-1;
+  for(let r=start;r<aoa.length;r++){
+    const lbl=String(aoa[r]?.[0]||'').trim(); if(!lbl) break;
+    if(/^total$/i.test(lbl)){ rTotal=r; end=r; break; }
+    if(rDep2>=0 && r>=rDep2){ end=r; break; }
+  }
+
+  for(let r=start;r<end;r++){
+    const lbl=String(aoa[r]?.[0]||'').trim(); if(!lbl) continue;
+    const st=String(lbl).toUpperCase().replace(/[^A-Z0-9]/g,''); if(!STAGES.includes(st)) continue;
+    for(const p of projects){
+      const s=parseDate(aoa[r]?.[p.c0]); const e=parseDate(aoa[r]?.[p.c0+1]);
+      if(s||e) out.push({name:p.name,code:p.code,team:p.team,stage:st,startISO:s,endISO:e,status:p.status,sow:p.sow,currentStage:p.currentStage,
+        est:p.hours?.est,spent:p.hours?.spent,balance:p.hours?.bal,toFinish:p.hours?.toFinish,resources:p.resources});
+    }
+  }
+
+  if(rTotal>=0){
+    for(const p of projects){
+      const s=parseDate(aoa[rTotal]?.[p.c0]);
+      const e=parseDate(aoa[rTotal]?.[p.c0+1]);
+      if(s||e) out.push({name:p.name,code:p.code,team:p.team,stage:'__TOTAL__',startISO:s,endISO:e,status:p.status,sow:p.sow,currentStage:p.currentStage,
+        est:p.hours?.est,spent:p.hours?.spent,balance:p.hours?.bal,toFinish:p.hours?.toFinish,resources:p.resources});
+    }
+  }
+  return out;
+}
+
+async function buildFromFile(){
+  const file=$('#file').files?.[0]; if(!file){alert('Select an .xlsm/.xlsx file.');return;}
+  const rep=[]; const log=s=>rep.push(s);
+  let sheets;
+  try{ sheets=await readWorkbook(file); }catch(e){ alert('Workbook parse failed: '+(e?.message||e)); return; }
+  let rows=[]; for(const sh of sheets){ rows=rows.concat(ingestSheet(sh.aoa, sh.name, log)); }
+  if(!rows.length){ alert('No usable rows.'); return; }
+
+  const projMap=new Map();
+  for(const r of rows){
+    const k=keyFromName(clean(r.name||'(No Title)'));
+    if(!projMap.has(k)) projMap.set(k,{key:k,name:clean(r.name||'(No Title)'),rows:[],codes:new Set(),teams:new Set(),hours:{},resources:new Map()});
+    const p=projMap.get(k);
+    p.rows.push(r); if(r.code) p.codes.add(r.code); if(r.team) p.teams.add(r.team);
+    if(Number.isFinite(r.est)) p.hours.est=r.est; if(Number.isFinite(r.spent)) p.hours.spent=r.spent;
+    if(Number.isFinite(r.balance)) p.hours.balance=r.balance; if(Number.isFinite(r.toFinish)) p.hours.toFinish=r.toFinish;
+    if(Array.isArray(r.resources)){ for(const x of r.resources){ const nm=clean(x?.name||''); if(!nm) continue; const pct=(x.pct!=null&&x.pct!==undefined)?x.pct:p.resources.get(nm); p.resources.set(nm,pct); } }
+  }
+
+  viewProjects=[];
+  for(const v of projMap.values()){
+    const byStage=new Map(); v.rows.sort((a,b)=>((a.endISO||a.startISO||'').localeCompare(b.endISO||b.startISO||'')));
+    for(const r of v.rows){ byStage.set(r.stage,r); }
+    const stageRanges=new Map();
+    for(const st of STAGES){
+      const r=byStage.get(st); if(!r) continue;
+      let s=r.startISO||r.endISO||'', e=r.endISO||r.startISO||''; if(s&&e&&e<s){const t=s;s=e;e=t;}
+      stageRanges.set(st,{startISO:s,endISO:e,stage:st});
+    }
+    viewProjects.push({
+      key:v.key,title:v.name,teams:[...v.teams],codes:[...v.codes],
+      stageRanges,
+      resources:[...v.resources.entries()].map(([name,pct])=>({name,pct}))
+    });
+  }
+
+  const ALL_TEAMS=[...new Set(viewProjects.flatMap(p=>p.teams))].sort((a,b)=>a.localeCompare(b));
+  $('#fTeam').innerHTML = '<option value="__ALL__">All teams</option>'+ALL_TEAMS.map(t=>`<option>${t}</option>`).join('');
+  renderTable();
+}
+
+/* Build table */
+function joinDeployment(arr){ if(!Array.isArray(arr)||!arr.length) return '—'; return arr.map(r=>`${r.name||'Unnamed'}${(r.pct!=null&&r.pct!==undefined)?` (${r.pct}%)`:''}`).join(', '); }
+function getWindow(){ const t=localTodayISO(); const sel=document.querySelector('input[name="dw"]:checked')?.value||'15'; if(sel==='15') return {from:addDays(t,-15),to:addDays(t,15)}; if(sel==='7') return {from:addDays(t,-7),to:addDays(t,7)}; return {from:$('#from').value||t,to:$('#to').value||t}; }
+function renderTable(){
+  const tbody=$('#tbody'); if(!viewProjects.length){ tbody.innerHTML='<tr><td colspan="6" class="tiny" style="padding:16px">Upload and build a workbook, then Apply.</td></tr>'; return; }
+  const teamSel=$('#fTeam').value||'__ALL__'; const {from,to}=getWindow(); const fromD=new Date(from), toD=new Date(to);
+  const today=localTodayISO();
+  const rows=[];
+  for(const p of viewProjects){
+    if(teamSel!=='__ALL__' && !p.teams.includes(teamSel)) continue;
+    for(const st of STAGES){
+      const rec=p.stageRanges.get(st); const endISO=rec?.endISO; if(!endISO) continue;
+      const d=new Date(endISO); if(isNaN(d)||d<fromD||d>toD) continue;
+      const delta=daysDiff(endISO,today);
+      let cls='dueUpcoming'; if(delta===0) cls='dueToday'; else if(delta<0) cls='dueMissed';
+      rows.push({
+        code:(p.codes&&p.codes.length)?p.codes.join(' / '):'—',
+        name:p.title||'—',
+        dateISO:endISO,
+        dateHuman:humanDate(endISO),
+        team:(p.teams&&p.teams.length)?p.teams.join(', '):'—',
+        deploy:joinDeployment(p.resources),
+        stage:st, cls
+      });
+    }
+  }
+  rows.sort((a,b)=> a.dateISO.localeCompare(b.dateISO) || a.name.localeCompare(b.name));
+  if(!rows.length){ tbody.innerHTML='<tr><td colspan="6" class="tiny" style="padding:16px">No stage end dates in the selected window.</td></tr>'; return; }
+
+  const frag=document.createDocumentFragment();
+  for(const r of rows){
+    const tr=document.createElement('tr');
+    const cls = r.cls==='dueToday'?'dueToday':(r.cls==='dueMissed'?'dueMissed':'dueUpcoming');
+    tr.innerHTML = `
+      <td class="mono nowrap">${r.code}</td>
+      <td>${r.name}</td>
+      <td class="nowrap"><span class="dueBadge ${cls}">${r.dateHuman}</span></td>
+      <td>${r.team}</td>
+      <td>${r.deploy}</td>
+      <td class="nowrap">${r.stage}</td>`;
+    frag.appendChild(tr);
+  }
+  tbody.innerHTML=''; tbody.appendChild(frag);
+
+  $('#rangeLabel').textContent = `Window: ${document.querySelector('input[name="dw"]:checked')?.labels?.[0]?.textContent || ''} (${from} → ${to})`;
+
+  const tbl=$('#prioTable'); makeTableResizable(tbl); applySavedColumnWidths(tbl);
+}
+
+/* Export (dd/mm/yyyy for Date) */
+function exportTable(){
+  const tbody=$('#tbody'); if(!tbody.children.length || tbody.children[0].children.length<6){ alert('Nothing to export.'); return; }
+  const t=localTodayISO(); const sel=document.querySelector('input[name="dw"]:checked')?.value||'15';
+  const fromTo=getWindow();
+  // Rebuild rows like renderTable to be safe with DMY format
+  const teamSel=$('#fTeam').value||'__ALL__';
+  const from=fromTo.from, to=fromTo.to, fromD=new Date(from), toD=new Date(to);
+  const rows=[];
+  for(const p of viewProjects){
+    if(teamSel!=='__ALL__' && !p.teams.includes(teamSel)) continue;
+    for(const st of STAGES){
+      const rec=p.stageRanges.get(st); const endISO=rec?.endISO; if(!endISO) continue;
+      const d=new Date(endISO); if(isNaN(d)||d<fromD||d>toD) continue;
+      rows.push({
+        "Project code": (p.codes&&p.codes.length)?p.codes.join(' / '):'—',
+        "Project name": p.title||'—',
+        "Date": toDMY(endISO),
+        "Team": (p.teams&&p.teams.length)?p.teams.join(', '):'—',
+        "Deployment": joinDeployment(p.resources),
+        "Task (stage)": st
+      });
+    }
+  }
+  if(!rows.length){ alert('No tasks in range to export.'); return; }
+  const ws=XLSX.utils.json_to_sheet(rows,{header:Object.keys(rows[0])});
+  ws['!cols']=[{wch:16},{wch:30},{wch:12},{wch:24},{wch:32},{wch:14}];
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'PriorityTasks');
+  XLSX.writeFile(wb, `Priority_${(sel==='custom'?(from.replaceAll('-','')+'_'+to.replaceAll('-','')):sel)}_${t}.xlsx`);
+}
+
+/* Column resizing */
+function colKey(t){ return `colWidths::${t.id||'prio'}`; }
+function saveW(t){ const ths=t.tHead?.rows?.[0]?.cells||[]; const arr=[...ths].map(th=>th.style.width||''); try{localStorage.setItem(colKey(t),JSON.stringify(arr));}catch{} }
+function applySavedColumnWidths(t){ let a=[]; try{a=JSON.parse(localStorage.getItem(colKey(t))||'[]')}catch{}; const ths=t.tHead?.rows?.[0]?.cells||[]; a.forEach((w,i)=>{ if(w){ setW(t,i,w); } }); }
+function setW(t,i,css){ const th=t.tHead?.rows?.[0]?.cells?.[i]; if(!th) return; th.style.width=css; const rows=t.tBodies[0]?.rows||[]; for(const r of rows){ const td=r.cells[i]; if(td) td.style.width=css; } }
+function autoSizeCol(t,i,min=48,max=640){
+  const th=t.tHead?.rows?.[0]?.cells?.[i]; if(!th) return;
+  const cells=[th,...Array.from(t.tBodies[0]?.rows||[]).map(r=>r.cells[i]).filter(Boolean)];
+  let maxW=0; for(const c of cells){ const clone=c.cloneNode(true); clone.style.width='auto'; clone.style.whiteSpace='nowrap'; clone.style.position='absolute'; clone.style.visibility='hidden'; clone.style.height='auto'; document.body.appendChild(clone); const w=clone.scrollWidth+20; document.body.removeChild(clone); if(w>maxW) maxW=w; }
+  setW(t,i,Math.max(min,Math.min(max,Math.ceil(maxW)))+'px');
+}
+function autoSizeAll(t){ const ths=t.tHead?.rows?.[0]?.cells||[]; for(let i=0;i<ths.length;i++) autoSizeCol(t,i); saveW(t); }
+function resetAllW(t){ const ths=t.tHead?.rows?.[0]?.cells||[]; for(let i=0;i<ths.length;i++) setW(t,i,''); try{localStorage.removeItem(colKey(t));}catch{} }
+
+function makeTableResizable(t){
+  if(!t || t.dataset.resizable!=='true') return;
+  const ths=t.tHead?.rows?.[0]?.cells||[];
+  [...ths].forEach(th=>{ const old=th.querySelector('.col-resizer'); if(old) old.remove(); th.style.position='relative'; });
+  [...ths].forEach((th,i)=>{
+    const h=document.createElement('div'); h.className='col-resizer'; th.appendChild(h);
+    let sx=0, sw=0;
+    const onMove=e=>{ const dx=e.clientX-sx; setW(t,i,Math.max(36,sw+dx)+'px'); };
+    const onUp=()=>{ document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp); saveW(t); };
+    h.addEventListener('mousedown',e=>{ e.preventDefault(); sx=e.clientX; sw=th.getBoundingClientRect().width; document.addEventListener('mousemove',onMove); document.addEventListener('mouseup',onUp); });
+    h.addEventListener('dblclick',e=>{ e.preventDefault(); autoSizeCol(t,i); saveW(t); });
+  });
+}
+
+$('#autosize').onclick=()=>autoSizeAll($('#prioTable'));
+$('#resetW').onclick=()=>resetAllW($('#prioTable'));
+</script>
+</body>
+</html>

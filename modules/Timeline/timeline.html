@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Timeline Mapping</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#f5f7fb; --panel:#fff; --ink:#0B1220; --muted:#475569;
+    --grid:#CBD5E1; --grid-strong:#94A3B8;
+    --head-bg:#0b1220; --head-fg:#fff;
+    --radius:12px;
+    --sidebarW:400px; --gap:12px;
+    --leftW:150px;
+    /* team overview: wider project column and shorter rows */
+    --leftWTeam:300px;          /* 2x width for team overview */
+    --rowH:22px; --barH:12px;
+    --monthW:42px;
+    --ctrlH:28px;
+    --overview-scale:0.6;       /* ~40% shorter rows in team overview */
+  }
+
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.35 Inter,system-ui,Segoe UI,Arial;overflow:hidden}
+  header{padding:10px 14px 4px} header h2{margin:0;font-weight:700}
+
+  .main{height:100vh;display:grid;gap:var(--gap);padding:0 14px 12px;
+        grid-template-columns: var(--sidebarW) 1fr;}
+
+  /* Buttons */
+  .btn-pill{appearance:none;border:none;cursor:pointer;padding:6px 12px;border-radius:999px;
+    color:#fff;font-weight:600;font-size:12px;background:linear-gradient(180deg,#6F4CF6 0%,#5B32E5 100%);
+    box-shadow:0 3px 7px rgba(109,40,217,.30), inset 0 1px 0 rgba(255,255,255,.35);
+    display:inline-flex;align-items:center;gap:6px}
+  .btn-pill:disabled{opacity:.45;cursor:not-allowed}
+  .pillRow{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .chip-mini{background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE;
+             padding:4px 8px;border-radius:999px;max-width:230px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;font-size:12px}
+
+  /* Toggle */
+  .switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+  .switch input{display:none}
+  .switch .track{position:relative;width:44px;height:24px;border-radius:999px;background:#E5E7EB;border:1px solid #CBD5E1;transition:.15s}
+  .switch .thumb{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.15);transition:left .15s}
+  .switch input:checked + .track{background:#6D28D9;border-color:#5B21B6}
+  .switch input:checked + .track .thumb{left:22px}
+  .switch .label{color:var(--muted);font-weight:600;font-size:12px}
+
+  /* Sidebar */
+  .sidebar{height:100%;overflow:auto;border:1px solid var(--grid-strong);border-radius:var(--radius);
+    background:#fff;padding:10px;box-sizing:border-box;min-width:var(--sidebarW);max-width:var(--sidebarW)}
+  .controls{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+  select{height:34px;width:100%;padding:0 10px;border:1px solid var(--grid-strong);border-radius:8px;background:#fff}
+  .hr{height:1px;background:var(--grid-strong);opacity:.6;margin:10px 0}
+  .title{margin:0;font-size:18px}
+  .codeLine{margin:0 0 2px 0; font-size:12px;font-weight:700;color:#334155;opacity:.9}
+  .chip{background:#E5E7EB;border:1px solid #9CA3AF;border-radius:999px;padding:3px 8px;font-size:12px;font-weight:600;margin-right:6px}
+  .badge{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:8px;font-size:12px;font-weight:700;border:1px solid transparent}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .empty{border:1px dashed var(--grid-strong);border-radius:12px;padding:18px;text-align:center;color:#334155;background:#F8FAFC}
+  .sectionLabel{opacity:.75;font-weight:600;margin-top:2px}
+  .hoursGrid{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--grid-strong);border-radius:8px;overflow:hidden}
+  .hoursGrid .cell{padding:4px 8px;border-right:1px solid var(--grid-strong);border-bottom:1px solid var(--grid-strong);font-size:13px}
+  .hoursGrid .cell.h{background:#F8FAFC}
+  .hoursGrid .cell:nth-child(4n){border-right:none}
+
+  /* Sliders */
+  .ctrlLabel{font-size:12px;color:#475569;font-weight:600;margin:2px 0}
+  .hScroll{width:100%;height:var(--ctrlH);border:1px solid #CBD5E1;border-radius:999px;
+           -webkit-appearance:none;appearance:none;background:linear-gradient(to right,#e5f6fa 0%,#e5f6fa 50%,#fde68a 50%,#fde68a 100%);
+           box-shadow:inset 0 1px 2px rgba(0,0,0,.1)}
+  .hScroll::-webkit-slider-runnable-track{height:calc(var(--ctrlH) - 2px);background:transparent;border:none;border-radius:999px}
+  .hScroll::-webkit-slider-thumb{-webkit-appearance:none;width:var(--ctrlH);height:var(--ctrlH);border-radius:50%;background:#fff;border:1px solid #9CA3AF;box-shadow:0 2px 4px rgba(0,0,0,.2);margin-top:-1px}
+
+  /* Timeline pane */
+  .timelinePane{height:100%;display:flex;flex-direction:column;border:1px solid var(--grid-strong);border-radius:var(--radius);background:#fff}
+  .headerSticky{position:sticky;top:0;z-index:5;background:var(--head-bg);color:var(--head-fg);border-bottom:1px solid #0b1220}
+  .headRow{display:flex;align-items:stretch}
+  .headLeft{flex:0 0 var(--leftW);width:var(--leftW);border-right:1px solid #0b1220;position:sticky;left:0;z-index:6;background:var(--head-bg);
+            display:flex;align-items:center;justify-content:center;font-weight:700;padding:6px 0}
+  .monthStrip,.dayStrip{display:flex}
+  .monthCell{flex:0 0 auto;text-align:center;padding:4px 0 6px;font-weight:600;opacity:.9;border-right:1px solid #0b1220}
+  .dayCell{flex:0 0 auto;text-align:center;padding:2px 0 4px;font-weight:600;opacity:.85;border-right:1px solid #1f2937}
+
+  .scrollHost{flex:1;position:relative;overflow-x:auto;overflow-y:auto;scrollbar-gutter:stable both-edges}
+
+  .grid{display:flex;position:relative;width:max-content;}
+  .leftCol{flex:0 0 var(--leftW);width:var(--leftW);border-right:1px solid var(--grid-strong);background:#fff;position:sticky;left:0;z-index:4}
+  .leftCol .stage,.leftCol .proj{height:var(--rowH);display:flex;align-items:center;padding:0 10px;border-bottom:1px solid var(--grid-strong);background:#fff}
+  .leftCol .stage.current{background:#EDE9FE;border-left:3px solid #7C3AED;color:#5B21B6;font-weight:700}
+  .rightCol{position:relative;flex:0 0 auto;background:
+    repeating-linear-gradient(to right,transparent 0,transparent calc(var(--monthW)-1px),#E2E8F0 calc(var(--monthW)-1px),#E2E8F0 var(--monthW))}
+  .row{position:relative;height:var(--rowH);border-bottom:1px solid #94A3B8}
+  .bar{position:absolute;top:50%;height:var(--barH);transform:translateY(-50%);
+       background:linear-gradient(90deg,#dff3c8,#bfdca0);border:1px solid #9BB57C;border-radius:9px}
+  .bubble{position:absolute;top:50%;transform:translate(-50%,-50%);width:20px;height:20px;border-radius:999px;
+          display:grid;place-items:center;font-weight:700;font-size:12px;color:#fff;border:1px solid rgba(0,0,0,.15)}
+  .bubble.start{background:#36A2CF}.bubble.end{background:#8B5CF6}.bubble.solo{background:#7C3AED}
+
+  /* Team Overview: wider project column + shorter rows */
+  .teamOverview .headLeft,
+  .teamOverview .leftCol{ width: var(--leftWTeam); flex: 0 0 var(--leftWTeam); }
+  .teamOverview .row { height: calc(var(--rowH) * var(--overview-scale)); }
+  .teamOverview .leftCol .proj { height: calc(var(--rowH) * var(--overview-scale)); }
+
+  /* Today & window markers */
+  .nowLine{
+    position:absolute; top:0; bottom:0; width:4px;
+    background:#ef4444; box-shadow:0 0 0 1px rgba(239,68,68,.35);
+    opacity:0.95; pointer-events:none; z-index:3;
+  }
+  .nowDash{
+    position:absolute; top:0; bottom:0;
+    border-left:2px dashed rgba(239,68,68,.85);
+    pointer-events:none; z-index:3;
+  }
+
+  /* End-date badges (sidebar) */
+  .dueBadge{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:8px;font-size:12px;font-weight:700;border:1px solid transparent}
+  .dueMissed{background:#ef4444;color:#fff;border-color:#b91c1c}
+  .dueToday{background:#f59e0b;color:#111827;border-color:#d97706}
+  .dueUpcoming{background:#3b82f6;color:#fff;border-color:#2563eb}
+</style>
+</head>
+<body>
+<header><h2>Timeline mapping</h2></header>
+
+<div class="main">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="controls">
+      <div class="pillRow">
+        <input id="file" type="file" accept=".xlsm,.xlsx,.xls,.csv" style="display:none"/>
+        <button id="chooseFileBtn" type="button" class="btn-pill">＋ Upload File</button>
+        <span id="fileName" class="chip-mini" title=""></span>
+      </div>
+
+      <div class="pillRow">
+        <button id="build" class="btn-pill" type="button">＋ Build</button>
+        <button id="parseBtn" class="btn-pill" type="button" disabled>↩ Parse Report</button>
+        <label class="switch"><input type="checkbox" id="hideEmptyStages"/><span class="track"><span class="thumb"></span></span><span class="label">Hide empty stages</span></label>
+      </div>
+
+      <select id="teamFilter" aria-label="Team"><option value="__ALL__">All teams</option></select>
+      <select id="projectFilter" aria-label="Project"><option value="__NONE__">Select a project</option></select>
+
+      <div>
+        <div class="ctrlLabel">Timeline scale</div>
+        <input id="zoomX" class="hScroll" type="range" min="20" max="120" step="5" value="40" />
+      </div>
+
+      <div>
+        <div class="ctrlLabel">Scroll timeline</div>
+        <input id="panX" class="hScroll" type="range" min="0" max="1000" step="1" value="0" />
+      </div>
+
+      <div class="pillRow" style="gap:6px">
+        <span style="font-size:12px;color:#475569;font-weight:600">Quick views</span>
+        <button class="segbtn active" data-labelmode="year" style="padding:6px 10px;border-radius:999px;border:1px solid #e5e7eb;background:#f8fafc;cursor:pointer;font-size:12px;font-weight:600;color:#374151">Year view</button>
+        <button class="segbtn" data-labelmode="month" style="padding:6px 10px;border-radius:999px;border:1px solid #e5e7eb;background:#f8fafc;cursor:pointer;font-size:12px;font-weight:600;color:#374151">Month view</button>
+      </div>
+    </div>
+
+    <div class="hr"></div>
+    <div id="projectDetails"><div class="empty">Pick a project for stages, or select a team (no project) for TOTAL-based overview.</div></div>
+  </aside>
+
+  <!-- TIMELINE -->
+  <section class="timelinePane">
+    <div id="scrollHost" class="scrollHost">
+      <div class="empty" style="margin:12px">Load a workbook, then select a team or a project.</div>
+    </div>
+  </section>
+</div>
+
+<!-- Parse Modal -->
+<div id="parseModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.28);z-index:60;align-items:center;justify-content:center">
+  <div style="width:min(900px,92vw);max-height:85vh;overflow:auto;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 12px 32px rgba(0,0,0,.25)">
+    <div style="display:flex;align-items:center;gap:10px;padding:10px;border-bottom:1px solid #e5e7eb;background:#f8fafc;position:sticky;top:0">
+      <button id="parseBack" class="btn-pill" type="button">← Back</button>
+      <div style="font-weight:700">Sheet Parse Report</div>
+    </div>
+    <pre id="parseBody" style="margin:0;padding:12px;white-space:pre-wrap;font:12px/1.45 ui-monospace,Menlo,Consolas,monospace">No report.</pre>
+  </div>
+</div>
+
+<script>
+/* ================== Config ================== */
+const PAST_WINDOW_DAYS   = 15; // past window for badges and dashed line
+const FUTURE_WINDOW_DAYS = 30; // future window for badges and dashed line
+
+/* ================== Utils ================== */
+const safeNum = (v, d=0) => (Number.isFinite(v) ? v : d);
+const clamp   = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+const $ = s => document.querySelector(s);
+
+// FIX: define hslToHex to avoid runtime ReferenceError
+function hslToHex(h, s, l) {
+  s/=100; l/=100;
+  const k=n=>(n+h/30)%12;
+  const a=s*Math.min(l,1-l);
+  const f=n=>l-a*Math.max(-1,Math.min(k(n)-3,Math.min(9-k(n),1)));
+  const to=x=>Math.round(255*x).toString(16).padStart(2,'0');
+  return `#${to(f(0))}${to(f(8))}${to(f(4))}`;
+}
+
+const STAGES=['PD','CD1','CD2','CD3','CD4','CD5','SD1','SD2','SD3','SD4','SD5','MC','AD','DD1','DD2','DD3','DD4','DD5','TD1','TD2','TD3','TD4','TD5','WD20','WD40','WD60','WD80','WD100','DC','CO'];
+const IGNORE_SHEETS=new Set(['deployment','template','database']);
+const clean=s=>String(s??'').replace(/[\u200B-\u200D\uFEFF]/g,'').replace(/\u00A0/g,' ').replace(/[\r\n]+/g,' ').replace(/\s+/g,' ').trim();
+const keyFromName=s=>clean(s).toLowerCase();
+const MONTH_NAMES_SHORT=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+let VIEW_PROJECTS=[]; 
+let STATUS_COLORS=new Map();
+let currentProjectKey=null;
+let PARSE_REPORT_TEXT='';
+let LABEL_MODE='year';
+
+/* ----- date helpers ----- */
+function localTodayISO(){
+  const d=new Date();
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dd}`;
+}
+function addDaysLocalISO(iso, delta){
+  const d = new Date(iso); if (isNaN(d)) return null;
+  d.setDate(d.getDate()+delta);
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dd}`;
+}
+function daysDiff(aISO,bISO){
+  const a=new Date(aISO), b=new Date(bISO);
+  if(isNaN(a)||isNaN(b)) return NaN;
+  const ms = a.setHours(0,0,0,0) - b.setHours(0,0,0,0);
+  return Math.round(ms/86400000);
+}
+function humanDate(iso){
+  if(!iso) return '—';
+  const d=new Date(iso); if(isNaN(d)) return iso;
+  const dd=String(d.getDate()).padStart(2,'0'), mon=MONTH_NAMES_SHORT[d.getMonth()];
+  return `${dd} ${mon} ${d.getFullYear()}`;
+}
+
+/* ----- pan helpers ----- */
+function hardMax(host){ const sw=Number(host?.scrollWidth)||0, cw=Number(host?.clientWidth)||0; return Math.max(0, sw-cw); }
+function daysInMonth(y,m0){ return new Date(y,m0+1,0).getDate(); }
+function buildMonths(minISO,maxISO,leftPad=2,rightPad=36){
+  if(!minISO||!maxISO) return [];
+  const a=new Date(minISO.slice(0,7)+'-01'), b=new Date(maxISO.slice(0,7)+'-01');
+  const months=[]; let c=new Date(a.getFullYear(),a.getMonth()-leftPad,1);
+  const end=new Date(b.getFullYear(),b.getMonth()+rightPad+1,1);
+  while(c<end){ months.push({y:c.getFullYear(),m:c.getMonth(),days:daysInMonth(c.getFullYear(),c.getMonth())}); c=new Date(c.getFullYear(),c.getMonth()+1,1); }
+  return months;
+}
+function ensureMinWidth(months,baseW,mode,targetWidth){
+  const calc=()=>{ 
+    if(mode==='month'){ 
+      const dayW=Math.max(6,Math.round(baseW/3)); 
+      const mWidths=months.map(m=>m.days*dayW); 
+      return {dayW,mWidths,total:mWidths.reduce((a,b)=>a+b,0)}; 
+    }
+    const mWidths=months.map(()=>baseW); 
+    return {dayW:baseW/30,mWidths,total:mWidths.reduce((a,b)=>a+b,0)}; 
+  };
+  let {dayW,mWidths,total}=calc();
+  while(total<targetWidth){ 
+    const last=months[months.length-1]; 
+    const nxt=new Date(last.y,last.m+1,1);
+    months.push({y:nxt.getFullYear(),m:nxt.getMonth(),days:daysInMonth(nxt.getFullYear(),nxt.getMonth())});
+    ({dayW,mWidths,total}=calc());
+  }
+  return {months,dayW,mWidths,total};
+}
+function pxForISOFlex(months,mWidths,iso,dayW){
+  if(!iso) return null; const d=new Date(iso); const y=d.getFullYear(),m=d.getMonth(),dd=d.getDate();
+  const idx=months.findIndex(x=>x.y===y&&x.m===m); if(idx<0) return null;
+  const before=mWidths.slice(0,idx).reduce((a,b)=>a+b,0);
+  const perDay=mWidths[idx]/months[idx].days; return before + (dd-1)*(dayW||perDay);
+}
+function computePanWindow(p, months, mWidths, host, dayW, labelMode){
+  if (!host) return {min:0, max:0};
+  const seam = getLeftWidth(host);
+  const viewportW  = safeNum(host.clientWidth, 0);
+  const xStart = pxForISOFlex(months, mWidths, p?.minStart, labelMode==='month' ? dayW : null);
+  const xEnd   = pxForISOFlex(months, mWidths, p?.maxEnd,   labelMode==='month' ? dayW : null);
+  if (!Number.isFinite(xStart) || !Number.isFinite(xEnd)) return {min:0, max:0};
+  const visibleRight = Math.max(1, viewportW - seam);
+  const minTarget = seam + xStart;
+  const maxTarget = Math.max(minTarget, seam + xEnd - visibleRight);
+  const hard = hardMax(host);
+  return { min: clamp(minTarget, 0, hard), max: clamp(maxTarget, 0, hard) };
+}
+function setSliderToPanWindow(host, slider, pan){
+  const span = Math.max(0, (pan?.max||0) - (pan?.min||0));
+  const hard = hardMax(host);
+  if (hard<=0 || span<=0) {
+    slider.disabled = true; slider.min='0'; slider.max='1'; slider.value='0';
+    host.scrollLeft = 0; paintRange?.(slider,0,0,1); return;
+  }
+  slider.disabled = false;
+  slider.min = String(Math.round(pan.min));
+  slider.max = String(Math.round(pan.max));
+  let v = Number(slider.value);
+  if(!Number.isFinite(v)) v = pan.min;
+  v = clamp(Math.round(v), pan.min, pan.max);
+  slider.value = String(v);
+  host.scrollLeft = v;
+  paintRange?.(slider, v, pan.min, pan.max);
+}
+let _scrollSyncHandlerWindow = null;
+function attachScrollSyncToWindow(host, slider, getPan){
+  if (!host || !slider) return;
+  if (_scrollSyncHandlerWindow) host.removeEventListener('scroll', _scrollSyncHandlerWindow);
+  _scrollSyncHandlerWindow = () => {
+    const pan = getPan(); const span = Math.max(0, pan.max - pan.min); if(span<=0) return;
+    const v = clamp(Math.round(host.scrollLeft), pan.min, pan.max);
+    if(slider.min !== String(Math.round(pan.min))) slider.min = String(Math.round(pan.min));
+    if(slider.max !== String(Math.round(pan.max))) slider.max = String(Math.round(pan.max));
+    if(+slider.value !== v){ slider.value = String(v); paintRange(panX, v, pan.min, pan.max); }
+  };
+  host.addEventListener('scroll', _scrollSyncHandlerWindow, {passive:true});
+}
+function getLeftWidth(host){
+  const el = host?.querySelector('.headLeft');
+  if (el) {
+    const w = parseFloat(getComputedStyle(el).width);
+    if (Number.isFinite(w) && w > 0) return w;
+  }
+  return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--leftW')) || 0;
+}
+
+/* ================== UI wiring ================== */
+$('#chooseFileBtn').onclick=()=>$('#file').click();
+$('#file').onchange=()=>{const f=$('#file').files?.[0]; const nm=f?f.name:''; $('#fileName').textContent=nm; $('#fileName').title=nm;};
+$('#hideEmptyStages').onchange=()=>renderSelected(false);
+$('#build').onclick=buildFromFile;
+$('#teamFilter').onchange=()=>{ updateProjectOptions(false); currentProjectKey=null; resetPan(); renderSelected(true); };
+$('#projectFilter').onchange=()=>{currentProjectKey=$('#projectFilter').value; resetPan(); renderSelected(true);} ;
+
+$('#parseBack').onclick=()=>{$('#parseModal').style.display='none';};
+$('#parseBtn').onclick=()=>{ $('#parseBody').textContent=PARSE_REPORT_TEXT||'No report.'; $('#parseModal').style.display='flex'; };
+
+document.querySelectorAll('.segbtn').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.segbtn').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  LABEL_MODE=b.dataset.labelmode||'year';
+  renderSelected(false);
+});
+
+/* Sliders */
+const zoomX=$('#zoomX'), panX=$('#panX');
+function paintRange(el,val,min,max){
+  const p=((val-min)/(max-min||1))*100;
+  el.style.background=`linear-gradient(to right,#e5f6fa 0%,#e5f6fa ${p}%,#fde68a ${p}%,#fde68a 100%)`;
+}
+function updateScale(){
+  const v=+zoomX.value;
+  paintRange(zoomX,v,+zoomX.min,+zoomX.max);
+  document.documentElement.style.setProperty('--monthW', v+'px');
+  renderSelected(false);
+}
+zoomX.addEventListener('input',updateScale);
+paintRange(zoomX,+zoomX.value,+zoomX.min,+zoomX.max);
+paintRange(panX,+panX.value,+panX.min,+panX.max);
+
+let _applyPan = () => {};
+panX.addEventListener('input', () => _applyPan());
+function resetPan(){
+  panX.value = '0';
+  paintRange(panX,+panX.value,+panX.min,+panX.max);
+  const host = document.getElementById('scrollHost');
+  if (host) host.scrollLeft = 0;
+}
+
+/* ================== Workbook ingest ================== */
+const MONTH_IDX={JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
+function asISO(d){ if(!(d instanceof Date)||isNaN(d))return ""; const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${dd}`; }
+function excelSerialToDate(n, is1904=false){
+  if (typeof n !== "number" || !isFinite(n)) return null;
+  if (is1904) { const d = new Date(1904, 0, 1); d.setDate(d.getDate() + n); return d; }
+  const epoch = new Date(1899, 11, 31);
+  const offset = n >= 60 ? n - 1 : n; // Excel leap-bug
+  const d = new Date(epoch); d.setDate(d.getDate() + offset); return d;
+}
+async function readWorkbook(file){
+  const wb=await new Promise((res,rej)=>{
+    const fr=new FileReader();
+    fr.onload=e=>{try{res(XLSX.read(e.target.result,{type:'array'}));}catch(err){rej(err)}};
+    fr.onerror=()=>rej(new Error('read fail'));
+    fr.readAsArrayBuffer(file);
+  });
+  window.__DATE1904__ = !!(wb?.Workbook?.WBProps?.date1904);
+  const all=[];
+  for(const name of wb.SheetNames){
+    const canon=String(name||'').trim().toLowerCase();
+    if(IGNORE_SHEETS.has(canon)) continue;
+    const ws=wb.Sheets[name]; if(!ws||!ws['!ref']) continue;
+    const aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,blankrows:false});
+    all.push({name,aoa});
+  }
+  return all;
+}
+function parseDate(v){
+  if(v==null||v==="") return "";
+  if(v instanceof Date && !isNaN(v)) return asISO(v);
+  if(typeof v === "number"){
+    if (XLSX?.SSF?.parse_date_code){
+      const dc = XLSX.SSF.parse_date_code(v,{date1904:!!window.__DATE1904__});
+      if(dc && dc.y && dc.m && dc.d) return asISO(new Date(dc.y, dc.m-1, dc.d));
+    }
+    const d = excelSerialToDate(v, !!window.__DATE1904__);
+    return d ? asISO(d) : "";
+  }
+  let s=String(v).trim(); if(!s) return "";
+  s=s.replace(/\s+\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?$/i," ").trim();
+  let m=s.match(/^(\d{1,2})[-\/\s]([A-Za-z]{3,})[-\/\s](\d{2,4})$/);
+  if(m){const d=+m[1],mon=MONTH_IDX[m[2].slice(0,3).toUpperCase()]; if(mon!=null){ let y=+m[3]; if(y<100) y+=(y>=70?1900:2000); return asISO(new Date(y,mon,d)); } }
+  m=s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})$/);
+  if(m){let y=+m[3]; if(y<100) y+=(y>=70?1900:2000); return asISO(new Date(y,+m[2]-1,+m[1]));}
+  m=s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+  if(m){ return asISO(new Date(+m[1],+m[2]-1,+m[3])); }
+  return "";
+}
+function ingestSheet(aoa,sheetName,log){
+  const out=[];
+  const findRow=(label)=>{
+    const tgt=String(label).toLowerCase().replace(/\s+/g,'');
+    for(let r=0;r<aoa.length;r++){
+      if(String(aoa[r]?.[0]??'').toLowerCase().replace(/\s+/g,'')===tgt) return r;
+    }
+    return -1;
+  };
+  const rCode=findRow('Project Code'),
+        rName=findRow('Project Name'),
+        rTeam=findRow('Team'),
+        rSOW=findRow('Scope of work'),
+        rStat=findRow('Project status'),
+        rCurr=findRow('Current stage'),
+        rTL=findRow('TIMELINE'),
+        rDep=findRow('DEPLOYMENT');
+  if(rTL<0||rName<0){ log?.('  ⚠ Missing TIMELINE or Project Name'); return out; }
+
+  function detectBlocks(rTL){
+    const has=(cell,kw)=>String(cell||'').toLowerCase().includes(kw);
+    for(let r=rTL-3;r<=rTL+3;r++){
+      if(r<0||r>=aoa.length) continue;
+      const row=aoa[r]||[]; const bases=[];
+      for(let c=1;c<row.length-3;c++){
+        const ok=has(row[c],'start')&&(has(row[c+1],'end')||has(row[c+1],'finish'))&&has(row[c+2],'alloc')&&(has(row[c+3],'consum')||has(row[c+3],'spent'));
+        if(ok) bases.push(c);
+      }
+      if(bases.length) return {bases,headerRow:r};
+    }
+    return {bases:[],headerRow:-1};
+  }
+  const {bases}=detectBlocks(rTL);
+  if(!bases.length){ log?.('  ⚠ Could not find Start|End|Allocated|Consumed near TIMELINE'); return out; }
+
+  const firstNonEmpty=arr=>{for(const v of arr){ if(v!==undefined&&v!==null&&String(v).trim()!=='') return String(v).trim(); } return ''; };
+  const rHours=findRow('HOURS'); const rHoursData=(rHours>=0&&rHours+1<aoa.length)?rHours+1:-1;
+
+  const projects=bases.map((c,idx)=>{
+    const name=clean(firstNonEmpty([aoa[rName]?.[c],aoa[rName]?.[c+1],aoa[rName]?.[c+2],aoa[rName]?.[c+3]])||`(Unnamed ${idx+1})`);
+    const code=firstNonEmpty([aoa[rCode]?.[c],aoa[rCode]?.[c+1],aoa[rCode]?.[c+2],aoa[rCode]?.[c+3]]);
+    const team=clean((rTeam>=0?firstNonEmpty([aoa[rTeam]?.[c],aoa[rTeam]?.[c+1],aoa[rTeam]?.[c+2],aoa[rTeam]?.[c+3]]):'')||sheetName||'');
+    const sow=firstNonEmpty([aoa[rSOW]?.[c],aoa[rSOW]?.[c+1],aoa[rSOW]?.[c+2],aoa[rSOW]?.[c+3]]);
+    const status=firstNonEmpty([aoa[rStat]?.[c],aoa[rStat]?.[c+1],aoa[rStat]?.[c+2],aoa[rStat]?.[c+3]]);
+    const currentRaw=firstNonEmpty([aoa[rCurr]?.[c],aoa[rCurr]?.[c+1],aoa[rCurr]?.[c+2],aoa[rCurr]?.[c+3]]);
+    const currentStage=String(currentRaw||'').split(/[,;&]+/).map(s=>String(s).toUpperCase().replace(/[^A-Z0-9]/g,'')).filter(Boolean).pop()||'';
+    let est,spent,bal,toFinish; const n=v=>{if(v==null||v==='')return NaN; const x=parseFloat(String(v).replace(/,/g,'')); return Number.isFinite(x)?x:NaN;};
+    if(rHoursData>=0){ est=n(aoa[rHoursData]?.[c]); spent=n(aoa[rHoursData]?.[c+1]); bal=n(aoa[rHoursData]?.[c+2]); toFinish=n(aoa[rHoursData]?.[c+3]); }
+
+    let resources=[]; 
+    if(rDep>=0){
+      const depHeader=aoa[rDep]||[];
+      let nameOff=0,pctOff=1;
+      for(let k=0;k<4;k++){
+        const h=String(depHeader[c+k]||'').toLowerCase();
+        if(h.includes('name')) nameOff=k;
+        if(h.includes('%')||h.includes('percent')) pctOff=k;
+      }
+      for(let rr=rDep+1; rr<aoa.length; rr++){
+        const lab=String(aoa[rr]?.[0]||'').trim(); if(!lab||!/^(deployment)\s*\d+/i.test(lab)) break;
+        const nm=clean(aoa[rr]?.[c+nameOff]||''); const pctRaw=aoa[rr]?.[c+pctOff];
+        const pct=(()=>{const nn=parseInt(String(pctRaw??'').replace(/[^0-9]/g,''),10); return Number.isFinite(nn)?nn:undefined;})();
+        if(nm||pct!==undefined) resources.push({name:nm,pct});
+      }
+    }
+    return {c0:c,name,code:clean(code),team,sow,status,currentStage,parseDate, hours:{est,spent,bal,toFinish},resources};
+  });
+
+  const start=rTL+1; let end=aoa.length; const rDep2=findRow('DEPLOYMENT'); let rTotal=-1;
+  for(let r=start;r<aoa.length;r++){
+    const lbl=String(aoa[r]?.[0]||'').trim(); if(!lbl) break;
+    if(/^total$/i.test(lbl)){ rTotal=r; end=r; break; }
+    if(rDep2>=0 && r>=rDep2){ end=r; break; }
+  }
+
+  for(let r=start;r<end;r++){
+    const lbl=String(aoa[r]?.[0]||'').trim(); if(!lbl) continue;
+    const st=String(lbl).toUpperCase().replace(/[^A-Z0-9]/g,''); if(!STAGES.includes(st)) continue;
+    for(const p of projects){
+      const s=parseDate(aoa[r]?.[p.c0]); const e=parseDate(aoa[r]?.[p.c0+1]);
+      if(s||e) out.push({name:p.name,code:p.code,team:p.team,stage:st,startISO:s,endISO:e,status:p.status,sow:p.sow,currentStage:p.currentStage,
+        est:p.hours?.est,spent:p.hours?.spent,balance:p.hours?.bal,toFinish:p.hours?.toFinish,resources:p.resources});
+    }
+  }
+
+  if(rTotal>=0){
+    for(const p of projects){
+      const s=parseDate(aoa[rTotal]?.[p.c0]);
+      const e=parseDate(aoa[rTotal]?.[p.c0+1]);
+      if(s||e) out.push({name:p.name,code:p.code,team:p.team,stage:'__TOTAL__',startISO:s,endISO:e,status:p.status,sow:p.sow,currentStage:p.currentStage,
+        est:p.hours?.est,spent:p.hours?.spent,balance:p.hours?.bal,toFinish:p.hours?.toFinish,resources:p.resources});
+    }
+  }
+  return out;
+}
+
+async function buildFromFile(){
+  const file=$('#file').files?.[0]; if(!file){alert('Select an .xlsm/.xlsx file.');return;}
+  $('#parseBtn').disabled=true; PARSE_REPORT_TEXT='';
+  const rep=[]; const log=s=>rep.push(s);
+
+  let sheets=[];
+  try{
+    sheets=await readWorkbook(file);
+    log(`Workbook: ${file.name}\nSheets parsed: ${sheets.map(s=>s.name).join(', ')}`);
+  }catch(e){ alert('Workbook parse failed: '+(e?.message||e)); return; }
+
+  let rows=[];
+  for(const sh of sheets){ const before=rows.length; rows=rows.concat(ingestSheet(sh.aoa, sh.name, log)); log(`• ${sh.name}: +${rows.length-before} rows`); }
+  if(!rows.length){ log('\nNo usable rows.'); finalizeReport(rep); alert('No usable rows found. Open Parse Report.'); return; }
+
+  const projMap=new Map();
+  for(const r of rows){
+    const k=keyFromName(clean(r.name||'(No Title)'));
+    if(!projMap.has(k)) projMap.set(k,{key:k,name:clean(r.name||'(No Title)'),rows:[],codes:new Set(),teams:new Set(),status:'',sow:'',currentStage:'',hours:{},resources:new Map()});
+    const p=projMap.get(k);
+    p.rows.push(r); if(r.code) p.codes.add(r.code); if(r.team) p.teams.add(r.team);
+    if(r.status) p.status=r.status; if(r.sow) p.sow=r.sow; if(r.currentStage) p.currentStage=r.currentStage;
+    if(Number.isFinite(r.est)) p.hours.est=r.est; if(Number.isFinite(r.spent)) p.hours.spent=r.spent;
+    if(Number.isFinite(r.balance)) p.hours.balance=r.balance; if(Number.isFinite(r.toFinish)) p.hours.toFinish=r.toFinish;
+    if(Array.isArray(r.resources)){ for(const x of r.resources){ const nm=clean(x?.name||''); if(!nm) continue; const pct=(x.pct!=null&&x.pct!==undefined)?x.pct:p.resources.get(nm); p.resources.set(nm,pct); } }
+  }
+
+  VIEW_PROJECTS=[];
+  for(const v of projMap.values()){
+    const byStage=new Map(); v.rows.sort((a,b)=>((a.endISO||a.startISO||'').localeCompare(b.endISO||b.startISO||'')));
+    for(const r of v.rows){ byStage.set(r.stage,r); }
+
+    const stageRanges=new Map(); let minStart=null,maxEnd=null;
+    for(const st of STAGES){
+      const r=byStage.get(st); if(!r) continue;
+      let s=r.startISO||r.endISO||'', e=r.endISO||r.startISO||'';
+      if(s&&e&&e<s){const t=s;s=e;e=t;}
+      stageRanges.set(st,{startISO:s,endISO:e,stage:st});
+      if(s&&(!minStart||s<minStart)) minStart=s;
+      if(e&&(!maxEnd||e>maxEnd)) maxEnd=e;
+    }
+
+    // TOTAL row (for team overview)
+    let totalStart=null,totalEnd=null;
+    const t = byStage.get('__TOTAL__');
+    if(t){ totalStart = t.startISO || null; totalEnd = t.endISO || null; }
+
+    const months=buildMonths(minStart,maxEnd);
+    VIEW_PROJECTS.push({
+      key:v.key,title:v.name,teams:[...v.teams],codes:[...v.codes],
+      status:v.status,sow:v.sow,currentStage:v.currentStage,
+      hours:v.hours,
+      resources:[...v.resources.entries()].map(([name,pct])=>({name,pct})),
+      stageRanges,months,minStart,maxEnd,
+      totalStart,totalEnd
+    });
+  }
+
+  const ALL_TEAMS=[...new Set(VIEW_PROJECTS.flatMap(p=>p.teams))].sort((a,b)=>a.localeCompare(b));
+  $('#teamFilter').innerHTML='<option value="__ALL__">All teams</option>'+ALL_TEAMS.map(t=>`<option>${t}</option>`).join('');
+  const statuses=[...new Set(VIEW_PROJECTS.map(p=>p.status).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  STATUS_COLORS=new Map(statuses.map((s,i)=>[s,hslToHex((60+i*360/28)%360,78,45)]));
+
+  log(`\nNormalized projects: ${VIEW_PROJECTS.length}`); finalizeReport(rep);
+  updateProjectOptions(false);
+  renderSelected(true);
+}
+function finalizeReport(lines){ PARSE_REPORT_TEXT=lines.join('\n'); $('#parseBtn').disabled=!PARSE_REPORT_TEXT; }
+
+/* ================== Render ================== */
+function updateProjectOptions(){
+  const team=$('#teamFilter').value;
+  const list = team==='__ALL__' ? VIEW_PROJECTS : VIEW_PROJECTS.filter(p=>p.teams.includes(team));
+  const map=new Map(); for(const p of list){ if(!map.has(p.key)) map.set(p.key,p); }
+  const items=[...map.values()].sort((a,b)=>a.title.localeCompare(b.title));
+  const projSel=$('#projectFilter');
+  projSel.innerHTML='<option value="__NONE__">Select a project</option>'+items.map(p=>`<option value="${p.key}">${p.title}</option>`).join('');
+  projSel.value='__NONE__';
+  currentProjectKey=null;
+}
+function findProjectByKey(k){ return VIEW_PROJECTS.find(p=>p.key===k)||null; }
+function resetViews(hint=false){
+  $('#projectDetails').innerHTML=`<div class="empty">${hint?'Pick a project to see details.':'Select a project.'}</div>`;
+  const host = document.getElementById('scrollHost');
+  if (host) host.classList.remove('teamOverview');
+  $('#scrollHost').innerHTML=`<div class="empty" style="margin:12px">${hint?'Choose a team or a project.':'Select a team or project.'}</div>`;
+}
+function renderSelected(resetPanOnNew){
+  const teamVal=$('#teamFilter').value;
+  const projVal=$('#projectFilter').value;
+
+  if(projVal && projVal!=='__NONE__'){
+    const p=findProjectByKey(projVal); if(!p){ alert('Selected project not found.'); return; }
+    if(resetPanOnNew){ resetPan(); }
+    renderSidebarProject(p);
+    renderTimeline(p);
+    return;
+  }
+
+  if(teamVal && teamVal!=='__ALL__'){
+    if(resetPanOnNew){ resetPan(); }
+    renderSidebarTeam(teamVal);
+    renderTeamOverview(teamVal);
+    return;
+  }
+
+  resetViews(true);
+}
+
+/* minor helper */
+function fmt(x){ return Number.isFinite(x)?String(x):'—'; }
+
+/* Sidebar for project with due badges */
+function renderSidebarProject(p){
+  const s=$('#projectDetails'); s.innerHTML='';
+  const mk=(tag,cls,txt)=>{const el=document.createElement(tag); if(cls) el.className=cls; if(txt!=null) el.textContent=txt; return el;};
+  if(p.codes?.length) s.appendChild(mk('div','codeLine',p.codes.join(' / ')));
+  s.appendChild(mk('h3','title',p.title));
+
+  const meta=document.createElement('div');
+  if(p.status){
+    // FIX: ensure status color maps to actual status
+    const base=STATUS_COLORS.get(p.status)||'#6B7280';
+    const st=document.createElement('span');
+    st.className='badge'; st.style.background=base; st.style.color='#fff'; st.textContent=p.status; meta.appendChild(st);
+  }
+  if(p.teams?.length){ const chip=mk('span','chip',`Teams: ${p.teams.join(', ')}`); meta.appendChild(chip); }
+  if(meta.children.length) s.appendChild(meta);
+
+  const today = localTodayISO();
+  const blockTitle = document.createElement('div'); blockTitle.style.cssText='margin-top:10px;font-size:12px;font-weight:700;color:#334155';
+  blockTitle.textContent = 'Stage end dates (15 days past / 30 days upcoming)';
+  s.appendChild(blockTitle);
+
+  let anyStageShown = false;
+  for (const st of STAGES) {
+    const rec = p.stageRanges.get(st);
+    const endISO = rec?.endISO;
+    if (!endISO) continue;
+
+    const delta = daysDiff(endISO, today); // negative=past, 0=today, positive=future
+    if (delta < -PAST_WINDOW_DAYS || delta > FUTURE_WINDOW_DAYS) continue;
+
+    anyStageShown = true;
+    let badgeCls='', badgeTxt='';
+    if (delta === 0) { badgeCls='dueToday';    badgeTxt='current date'; }
+    else if (delta < 0) { badgeCls='dueMissed';  badgeTxt='missed date'; }
+    else { badgeCls='dueUpcoming'; badgeTxt='upcoming date'; }
+
+    const row = document.createElement('div'); row.style.cssText='display:flex;align-items:center;gap:8px;margin:8px 0 2px';
+    const label = document.createElement('span'); label.style.cssText='font-size:12px;color:#475569;font-weight:600'; label.textContent = `${st} end:`;
+    const dateEl = document.createElement('span'); dateEl.style.fontWeight='700'; dateEl.textContent = humanDate(endISO);
+    const badge = document.createElement('span'); badge.className = `dueBadge ${badgeCls}`; badge.textContent = badgeTxt;
+
+    row.appendChild(label); row.appendChild(dateEl); row.appendChild(badge);
+    s.appendChild(row);
+  }
+
+  if (!anyStageShown) {
+    const none = document.createElement('div'); none.style.cssText='font-size:12px;color:#475569;margin-top:6px';
+    none.textContent = 'No stage end dates in this window.'; s.appendChild(none);
+  }
+
+  // Overall end date
+  const dueISO = p.totalEnd || p.maxEnd || null;
+  const dueRow = document.createElement('div'); dueRow.style.cssText='display:flex;align-items:center;gap:8px;margin:8px 0 2px';
+  const label  = document.createElement('span'); label.style.cssText='font-size:12px;color:#475569;font-weight:600'; label.textContent='Overall end date:';
+  const dateEl = document.createElement('span'); dateEl.style.fontWeight='700'; dateEl.textContent = humanDate(dueISO);
+  dueRow.appendChild(label); dueRow.appendChild(dateEl);
+
+  if(dueISO){
+    const delta = daysDiff(dueISO, today);
+    let badgeTxt='', badgeCls='';
+    if (delta === 0) { badgeTxt='current date'; badgeCls='dueBadge dueToday'; }
+    else if (delta < 0 && delta >= -PAST_WINDOW_DAYS) { badgeTxt='missed date'; badgeCls='dueBadge dueMissed'; }
+    else if (delta > 0 && delta <= FUTURE_WINDOW_DAYS) { badgeTxt='upcoming date'; badgeCls='dueBadge dueUpcoming'; }
+    if(badgeTxt){
+      const badge=document.createElement('span'); badge.className=badgeCls; badge.textContent=badgeTxt;
+      dueRow.appendChild(badge);
+    }
+  }
+  s.appendChild(dueRow);
+
+  // Hours
+  s.appendChild(mk('div','sectionLabel','Hours'));
+  const grid=document.createElement('div'); grid.className='hoursGrid';
+  grid.innerHTML=`<div class="cell h">Estimated</div><div class="cell h">Spent</div><div class="cell h">Balance</div><div class="cell h">To finish hours</div>
+                  <div class="cell">${fmt(p.hours?.est)}</div><div class="cell">${fmt(p.hours?.spent)}</div><div class="cell">${fmt(p.hours?.balance)}</div><div class="cell">${fmt(p.hours?.toFinish)}</div>`;
+  s.appendChild(grid);
+
+  s.appendChild(mk('div','sectionLabel','Team Deployment'));
+  const chips=document.createElement('div'); chips.className='chips';
+  if(p.resources?.length){ for(const r of p.resources){ chips.appendChild(mk('span','chip',`${r.name||''}${(r.pct!=null&&r.pct!==undefined)?` — ${r.pct}%`:''}`)); } }
+  else chips.appendChild(mk('span','chip','No deployment listed'));
+  s.appendChild(chips);
+}
+
+/* vertical lines: today solid, -15 and +30 dashed */
+function drawNowLineRight(rightCol, months, mWidths, dayW){
+  rightCol.querySelectorAll('.nowLine, .nowDash').forEach(n=>n.remove());
+  const today = localTodayISO();
+  const prev = addDaysLocalISO(today, -PAST_WINDOW_DAYS);
+  const next = addDaysLocalISO(today,  FUTURE_WINDOW_DAYS);
+  const place = (iso, cls) => {
+    const x = pxForISOFlex(months, mWidths, iso, LABEL_MODE==='month' ? dayW : null);
+    if (x==null) return;
+    const el = document.createElement('div');
+    el.className = cls;
+    el.style.left = `${x}px`;
+    rightCol.appendChild(el);
+  };
+  place(prev, 'nowDash');
+  place(next, 'nowDash');
+  place(today,  'nowLine');
+}
+
+let _resizeHandler = null;
+function renderTimeline(p){
+  const host=$('#scrollHost'); host.innerHTML=''; host.classList.remove('teamOverview');
+
+  let months = buildMonths(p.minStart, p.maxEnd, 2, 36);
+  const BASE_W=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--monthW')) || 42;
+  if(!months.length){ host.innerHTML='<div class="empty" style="margin:12px">No timeline dates found for this project.</div>'; panX.disabled=true; return; }
+  const target = Math.max(2000, host.clientWidth * 4);
+  const ex = ensureMinWidth(months, BASE_W, LABEL_MODE, target);
+  months = ex.months; const dayW=ex.dayW, mWidths=ex.mWidths, total=ex.total;
+
+  const wrap=document.createElement('div');
+
+  /* header: month row only (years removed) */
+  const header=document.createElement('div'); header.className='headerSticky';
+  const mRow=document.createElement('div'); mRow.className='headRow';
+  mRow.appendChild(Object.assign(document.createElement('div'),{className:'headLeft',textContent:'Stage'}));
+  const ms=document.createElement('div'); const monthStrip=document.createElement('div'); monthStrip.className='monthStrip';
+  for(let k=0;k<months.length;k++){
+    const mo=months[k]; const mc=document.createElement('div');
+    mc.className='monthCell'; mc.style.width=mWidths[k]+'px'; mc.textContent = MONTH_NAMES_SHORT[mo.m];
+    monthStrip.appendChild(mc);
+  }
+  ms.appendChild(monthStrip); mRow.appendChild(ms); header.appendChild(mRow);
+
+  if(LABEL_MODE==='month'){
+    const dRow=document.createElement('div'); dRow.className='headRow';
+    dRow.appendChild(Object.assign(document.createElement('div'),{className:'headLeft'}));
+    const ds=document.createElement('div'); const dayStrip=document.createElement('div'); dayStrip.className='dayStrip';
+    for(let k=0;k<months.length;k++){ const mo=months[k]; for(let d=1; d<=mo.days; d++){ const dc=document.createElement('div'); dc.className='dayCell'; dc.style.width=dayW+'px'; dc.textContent=(d%5===0||d===mo.days)?String(d):''; dayStrip.appendChild(dc);} }
+    ds.appendChild(dayStrip); dRow.appendChild(ds); header.appendChild(dRow);
+  }
+  wrap.appendChild(header);
+
+  /* grid */
+  const grid=document.createElement('div'); grid.className='grid';
+  const left=document.createElement('div'); left.className='leftCol';
+  const rightCol=document.createElement('div'); rightCol.className='rightCol';
+  if(LABEL_MODE==='month') rightCol.style.background='none';
+  rightCol.style.width = total + 'px';
+
+  const hideEmpty=$('#hideEmptyStages')?.checked;
+  for(const st of STAGES){
+    const rec=p.stageRanges.get(st); const has=rec&&(rec.startISO||rec.endISO); if(hideEmpty && !has) continue;
+    const name=document.createElement('div'); name.className='stage'; name.textContent=st; if(p.currentStage&&p.currentStage===st) name.classList.add('current'); left.appendChild(name);
+    const row=document.createElement('div'); row.className='row'; row.style.width=rightCol.style.width;
+
+    if(has){
+      const x1=pxForISOFlex(months,mWidths,rec.startISO||rec.endISO, LABEL_MODE==='month'?dayW:null);
+      const x2=pxForISOFlex(months,mWidths,rec.endISO||rec.startISO, LABEL_MODE==='month'?dayW:null);
+      if(x1!=null && x2!=null){
+        const L=Math.min(x1,x2), R=Math.max(x1,x2);
+        const bar=document.createElement('div'); bar.className='bar'; bar.style.left=(L+3)+'px'; bar.style.width=Math.max(1,(R-L)-6)+'px';
+        bar.dataset.type='bar'; bar.dataset.stage=st; bar.dataset.start=rec.startISO||''; bar.dataset.end=rec.endISO||''; row.appendChild(bar);
+        if(rec.startISO){ const b1=document.createElement('div'); b1.className='bubble start'; b1.style.left=(x1)+'px'; b1.textContent=parseInt(rec.startISO.slice(8,10),10); b1.dataset.type='start'; b1.dataset.stage=st; b1.dataset.date=rec.startISO; row.appendChild(b1); }
+        if(rec.endISO){ const b2=document.createElement('div'); b2.className='bubble end'; b2.style.left=(x2)+'px'; b2.textContent=parseInt(rec.endISO.slice(8,10),10); b2.dataset.type='end'; b2.dataset.stage=st; b2.dataset.date=rec.endISO; row.appendChild(b2); }
+        if(rec.startISO && rec.endISO && rec.startISO===rec.endISO){ row.lastElementChild?.classList.add('solo'); }
+      }
+    }
+    rightCol.appendChild(row);
+  }
+
+  drawNowLineRight(rightCol, months, mWidths, dayW);
+
+  grid.appendChild(left);
+  grid.appendChild(rightCol);
+
+  const leftWidth = getLeftWidth(wrap);
+  const wide = leftWidth + total;
+  grid.style.minWidth = wide + 'px';
+  wrap.style.width = wide + 'px';
+  wrap.appendChild(grid);
+  host.appendChild(wrap);
+
+  let PAN = computePanWindow(p, months, mWidths, host, dayW, LABEL_MODE);
+  attachScrollSyncToWindow(host, panX, () => PAN);
+
+  _applyPan = () => {
+    const span = Math.max(0, PAN.max - PAN.min);
+    if(span<=0) return;
+    let v = Number(panX.value);
+    if(!Number.isFinite(v)) v = PAN.min;
+    v = clamp(Math.round(v), PAN.min, PAN.max);
+    if(host.scrollLeft !== v) host.scrollLeft = v;
+    paintRange(panX, v, PAN.min, PAN.max);
+  };
+  setSliderToPanWindow(host, panX, PAN);
+
+  if(_resizeHandler) window.removeEventListener('resize', _resizeHandler);
+  _resizeHandler = () => {
+    PAN = computePanWindow(p, months, mWidths, host, dayW, LABEL_MODE);
+    setSliderToPanWindow(host, panX, PAN);
+  };
+  window.addEventListener('resize', _resizeHandler, {passive:true});
+}
+
+/* Team overview using TOTAL row (fallback min/max) */
+function renderSidebarTeam(team){
+  const s = $('#projectDetails');
+  s.innerHTML = `<h3 class="title">Team Overview — ${team}</h3>
+                 <div class="chip">Project column = 2× width</div>`;
+}
+function renderTeamOverview(team){
+  const host=$('#scrollHost'); host.innerHTML=''; host.classList.add('teamOverview');
+
+  const projects = VIEW_PROJECTS
+    .filter(p => p.teams.includes(team))
+    .map(p => ({ title: p.title, start: p.totalStart || p.minStart, end: p.totalEnd || p.maxEnd }))
+    .filter(p => p.start || p.end);
+
+  if(!projects.length){
+    host.innerHTML = '<div class="empty" style="margin:12px">No dated projects found for this team.</div>';
+    panX.disabled=true; return;
+  }
+
+  const minDate = projects.reduce((m,p)=> (p.start && (!m || p.start<m))?p.start:m, null);
+  const maxDate = projects.reduce((m,p)=> (p.end   && (!m || p.end  >m))?p.end  :m, null);
+
+  let months = buildMonths(minDate, maxDate, 2, 36);
+  const BASE_W=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--monthW')) || 42;
+  const target = Math.max(2000, host.clientWidth * 4);
+  const ex     = ensureMinWidth(months, BASE_W, LABEL_MODE, target);
+  months       = ex.months; const dayW=ex.dayW, mWidths=ex.mWidths, total=ex.total;
+
+  projects.sort((a,b)=> (a.start||'').localeCompare(b.start||'') || a.title.localeCompare(b.title));
+
+  const wrap=document.createElement('div');
+
+  // Header: month row only
+  const header=document.createElement('div'); header.className='headerSticky';
+  const mRow=document.createElement('div'); mRow.className='headRow';
+  mRow.appendChild(Object.assign(document.createElement('div'),{className:'headLeft',textContent:'Project'}));
+  const ms=document.createElement('div'); const monthStrip=document.createElement('div'); monthStrip.className='monthStrip';
+  for(let k=0;k<months.length;k++){
+    const mo=months[k]; const mc=document.createElement('div');
+    mc.className='monthCell'; mc.style.width=mWidths[k]+'px'; mc.textContent = MONTH_NAMES_SHORT[mo.m];
+    monthStrip.appendChild(mc);
+  }
+  ms.appendChild(monthStrip); mRow.appendChild(ms); header.appendChild(mRow);
+
+  if(LABEL_MODE==='month'){
+    const dRow=document.createElement('div'); dRow.className='headRow';
+    dRow.appendChild(Object.assign(document.createElement('div'),{className:'headLeft'}));
+    const ds=document.createElement('div'); const dayStrip=document.createElement('div'); dayStrip.className='dayStrip';
+    for(let k=0;k<months.length;k++){ const mo=months[k]; for(let d=1; d<=mo.days; d++){ const dc=document.createElement('div'); dc.className='dayCell'; dc.style.width=dayW+'px'; dc.textContent=(d%5===0||d===mo.days)?String(d):''; dayStrip.appendChild(dc);} }
+    ds.appendChild(dayStrip); dRow.appendChild(ds); header.appendChild(dRow);
+  }
+  wrap.appendChild(header);
+
+  // Grid + rows
+  const grid=document.createElement('div'); grid.className='grid';
+  const left=document.createElement('div'); left.className='leftCol';
+  const rightCol=document.createElement('div'); rightCol.className='rightCol';
+  if(LABEL_MODE==='month') rightCol.style.background='none';
+  rightCol.style.width = total + 'px';
+
+  for(const p of projects){
+    const name=document.createElement('div'); name.className='proj'; name.textContent=p.title; left.appendChild(name);
+    const row=document.createElement('div'); row.className='row'; row.style.width=rightCol.style.width;
+
+    const x1=pxForISOFlex(months,mWidths,p.start||p.end, LABEL_MODE==='month'?dayW:null);
+    const x2=pxForISOFlex(months,mWidths,p.end||p.start, LABEL_MODE==='month'?dayW:null);
+    if(x1!=null && x2!=null){
+      const L=Math.min(x1,x2), R=Math.max(x1,x2);
+      const bar=document.createElement('div'); bar.className='bar'; bar.style.left=(L+3)+'px'; bar.style.width=Math.max(1,(R-L)-6)+'px';
+      row.appendChild(bar);
+      if(p.start){ const b1=document.createElement('div'); b1.className='bubble start'; b1.style.left=(x1)+'px'; b1.textContent=parseInt(p.start.slice(8,10),10); row.appendChild(b1); }
+      if(p.end){   const b2=document.createElement('div'); b2.className='bubble end';   b2.style.left=(x2)+'px'; b2.textContent=parseInt(p.end.slice(8,10),10); row.appendChild(b2); }
+      if(p.start && p.end && p.start===p.end){ row.lastElementChild?.classList.add('solo'); }
+    }
+    rightCol.appendChild(row);
+  }
+
+  drawNowLineRight(rightCol, months, mWidths, dayW);
+
+  grid.appendChild(left);
+  grid.appendChild(rightCol);
+
+  const leftWidth = getLeftWidth(wrap);
+  const wide = leftWidth + total;
+  grid.style.minWidth = wide + 'px';
+  wrap.style.width = wide + 'px';
+  wrap.appendChild(grid);
+  host.appendChild(wrap);
+
+  let PAN = computePanWindow({minStart:minDate,maxEnd:maxDate}, months, mWidths, host, dayW, LABEL_MODE);
+  attachScrollSyncToWindow(host, panX, () => PAN);
+  _applyPan = () => {
+    const span = Math.max(0, PAN.max - PAN.min);
+    if(span<=0) return;
+    let v = Number(panX.value);
+    if(!Number.isFinite(v)) v = PAN.min;
+    v = clamp(Math.round(v), PAN.min, PAN.max);
+    if(host.scrollLeft !== v) host.scrollLeft = v;
+    paintRange(panX, v, PAN.min, PAN.max);
+  };
+  setSliderToPanWindow(host, panX, PAN);
+
+  if(_resizeHandler) window.removeEventListener('resize', _resizeHandler);
+  _resizeHandler = () => {
+    PAN = computePanWindow({minStart:minDate,maxEnd:maxDate}, months, mWidths, host, dayW, LABEL_MODE);
+    setSliderToPanWindow(host, panX, PAN);
+  };
+  window.addEventListener('resize', _resizeHandler, {passive:true});
+}
+</script>
+</body>
+</html>

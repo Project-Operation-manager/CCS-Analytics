@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Analytics Hub</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{
+      --nav-w: 240px; --bg:#0b1220; --panel:#101827; --ink:#e5e7eb; --muted:#94a3b8;
+      --brand:#7c3aed; --brand-2:#5b32e5; --hover:#1f2937; --active:#111827; --bd:#1f2937;
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 system-ui,Segoe UI,Inter,Arial}
+    .app{display:grid;grid-template-columns:var(--nav-w) 1fr;height:100vh;max-height:100vh;overflow:hidden}
+    nav{background:var(--panel);border-right:1px solid var(--bd);display:flex;flex-direction:column;min-width:0}
+    .brand{font-weight:800;padding:16px 16px 8px;margin:0;font-size:18px;letter-spacing:.2px}
+    .sub{color:var(--muted);padding:0 16px 8px;font-size:12px}
+    .links{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:4px}
+    .links a{display:flex;gap:8px;align-items:center;padding:10px 14px;color:var(--ink);text-decoration:none;border-left:3px solid transparent}
+    .links a:hover{background:var(--hover)}
+    .links a.active{background:var(--active);border-left-color:linear-gradient(180deg,var(--brand),var(--brand-2))}
+    .spacer{flex:1}
+    .foot{color:var(--muted);padding:10px 14px;font-size:12px;border-top:1px solid var(--bd)}
+    main{position:relative;background:#0b1220}
+    .bar{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--bd);background:#0d1424}
+    .bar .title{margin:0;font-weight:700}
+    .frame-wrap{position:absolute;inset:48px 0 0 0}
+    iframe{width:100%;height:100%;border:0;background:#0b1220}
+    .loading{position:absolute;inset:48px 0 0 0;display:grid;place-items:center;color:var(--muted);pointer-events:none}
+    .hidden{display:none}
+    .btn{appearance:none;border:1px solid var(--bd);background:#121a2c;color:#e5e7eb;border-radius:8px;padding:6px 10px;font-weight:600;cursor:pointer}
+    .btn:hover{background:#15203a}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- SIDE NAV: just switches hash routes; pages load below in the iframe -->
+    <nav>
+      <h1 class="brand">Analytics</h1>
+      <div class="sub">Modules</div>
+      <ul class="links" id="links">
+        <li><a href="#/timeline" data-title="Timeline mapping">🗂️ Timeline mapping</a></li>
+        <li><a href="#/priority" data-title="Priority tasks">⭐ Priority tasks</a></li>
+        <li><a href="#/hours" data-title="Work hours">⏱️ Work hours</a></li>
+      </ul>
+      <div class="spacer"></div>
+    </nav>
+    <!-- HOST: simple top bar + iframe that loads each module page -->
+    <main>
+      <div class="bar">
+        <h2 class="title" id="pageTitle">Timeline mapping</h2>
+        <button class="btn" id="openInTab" title="Open current module in a new tab">Open in new tab</button>
+      </div>
+      <div class="frame-wrap">
+        <iframe id="frame" src="" loading="eager" referrerpolicy="no-referrer"></iframe>
+        <div id="loading" class="loading">Loading…</div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // Map routes -> page files (same repo/folder). Adjust paths if needed.
+    const ROUTES = {
+      '#/timeline': 'modules/timeline/timeline.html',
+      '#/priority': 'modules/Priority task/priority.html',
+      '#/hours':    'modules/Workload/hours.html'
+    };
+
+    const frame = document.getElementById('frame');
+    const loading = document.getElementById('loading');
+    const titleEl = document.getElementById('pageTitle');
+    const links = Array.from(document.querySelectorAll('#links a'));
+    const openBtn = document.getElementById('openInTab');
+
+    function setActive(route) {
+      links.forEach(a => a.classList.toggle('active', a.getAttribute('href') === route));
+      const active = links.find(a => a.getAttribute('href') === route);
+      if (active) titleEl.textContent = active.dataset.title || 'Analytics';
+      document.title = 'Analytics — ' + titleEl.textContent;
+    }
+
+    function resolveRoute() {
+      const r = location.hash.replace(/(\?.*)$/, '') || '#/timeline';
+      return ROUTES[r] ? r : '#/timeline';
+    }
+
+    function loadRoute() {
+      const route = resolveRoute();
+      setActive(route);
+      const url = ROUTES[route];
+      loading.classList.remove('hidden');
+      frame.src = url;
+    }
+
+    frame.addEventListener('load', () => {
+      loading.classList.add('hidden');
+      // Optional: sync document.title to child page's title if same-origin & accessible
+      try {
+        const childTitle = frame.contentDocument?.title;
+        if (childTitle) document.title = 'Analytics — ' + childTitle;
+      } catch (_) {}
+    });
+
+    window.addEventListener('hashchange', loadRoute);
+    openBtn.addEventListener('click', () => {
+      const route = resolveRoute();
+      const url = ROUTES[route];
+      window.open(url, '_blank', 'noopener,noreferrer');
+    });
+
+    // First paint
+    if (!location.hash) location.hash = '#/timeline';
+    loadRoute();
+  </script>
+</body>
+</html>

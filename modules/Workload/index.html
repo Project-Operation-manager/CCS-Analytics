@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Work Hours</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root{ --bg:#f5f7fb; --ink:#0B1220; --radius:12px; }
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:14px/1.35 Inter,system-ui,Segoe UI,Arial;overflow:hidden}
+  header{padding:10px 14px 4px} header h2{margin:0;font-weight:700}
+  .wrap{height:100vh;display:flex;flex-direction:column}
+  .card{margin:10px 14px 14px;background:#fff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+  .top{padding:12px;border-bottom:1px solid #e5e7eb;background:#f8fafc;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .btn-pill{appearance:none;border:none;cursor:pointer;padding:6px 12px;border-radius:999px;color:#fff;font-weight:600;font-size:12px;background:linear-gradient(180deg,#6F4CF6 0%,#5B32E5 100%);box-shadow:0 3px 7px rgba(109,40,217,.30), inset 0 1px 0 rgba(255,255,255,.35);display:inline-flex;align-items:center;gap:6px}
+  .chip-mini{background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE;padding:4px 8px;border-radius:999px;max-width:230px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;font-size:12px}
+  .scroll{flex:1;min-height:0;overflow:auto}
+  table[data-resizable="true"]{width:max-content;table-layout:auto;border-collapse:separate;border-spacing:0}
+  thead th, tbody td{white-space:nowrap}
+  thead th{position:sticky;top:0;background:#0b1220;color:#fff;font-weight:700;text-align:left;font-size:12px;padding:10px;border-bottom:1px solid #0b1220;padding-right:16px}
+  tbody td{padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;font-size:13px}
+  tbody tr:nth-child(odd){background:#fafafa}
+  .col-resizer{position:absolute;top:0;right:0;width:8px;height:100%;cursor:col-resize;user-select:none}
+  .col-resizer:after{content:'';position:absolute;top:15%;bottom:15%;right:3px;width:2px;background:rgba(255,255,255,.35)}
+  .tiny{font-size:12px;color:#64748b} .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+</style>
+</head>
+<body>
+<header><h2>Work hours</h2></header>
+
+<div class="wrap">
+  <div class="card">
+    <div class="top">
+      <input id="file" type="file" accept=".xlsm,.xlsx,.xls,.csv" style="display:none"/>
+      <button id="choose" class="btn-pill">＋ Upload File</button>
+      <span id="fname" class="chip-mini"></span>
+      <button id="build" class="btn-pill">＋ Build</button>
+      <button id="autosize" class="btn-pill" title="Autosize columns">↔ Autosize</button>
+      <button id="resetW" class="btn-pill" title="Reset column widths">⟲ Reset widths</button>
+      <div class="tiny">Rows show one project aggregated across its sheet timeline.</div>
+    </div>
+
+    <div class="scroll">
+      <table id="hoursTable" data-resizable="true" aria-label="Hours summary">
+        <thead>
+          <tr>
+            <th>Project code</th>
+            <th>Project name</th>
+            <th>Team(s)</th>
+            <th class="mono">Estimated</th>
+            <th class="mono">Spent</th>
+            <th class="mono">Balance</th>
+            <th class="mono">To finish</th>
+          </tr>
+        </thead>
+        <tbody id="tbody">
+          <tr><td colspan="7" style="padding:16px" class="tiny">Upload and build a workbook to view hours.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const clean=s=>String(s??'').replace(/[\u200B-\u200D\uFEFF]/g,'').replace(/\u00A0/g,' ').replace(/[\r\n]+/g,' ').replace(/\s+/g,' ').trim();
+const keyFromName=s=>clean(s).toLowerCase();
+const MONTH_IDX={JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
+const STAGES=['PD','CD1','CD2','CD3','CD4','CD5','SD1','SD2','SD3','SD4','SD5','MC','AD','DD1','DD2','DD3','DD4','DD5','TD1','TD2','TD3','TD4','TD5','WD20','WD40','WD60','WD80','WD100','DC','CO'];
+
+let projects=[];
+
+$('#choose').onclick=()=>$('#file').click();
+$('#file').onchange=()=>{const f=$('#file').files?.[0]; $('#fname').textContent=f?f.name:''; $('#fname').title=f?f.name:'';};
+$('#build').onclick=buildFromFile;
+
+function asISO(d){ if(!(d instanceof Date)||isNaN(d))return ""; const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${dd}`; }
+function excelSerialToDate(n,is1904=false){ if(typeof n!=="number"||!isFinite(n))return null; if(is1904){const d=new Date(1904,0,1); d.setDate(d.getDate()+n); return d;} const epoch=new Date(1899,11,31); const offset=n>=60?n-1:n; const d=new Date(epoch); d.setDate(d.getDate()+offset); return d; }
+
+async function readWorkbook(file){
+  const wb=await new Promise((res,rej)=>{
+    const fr=new FileReader();
+    fr.onload=e=>{try{res(XLSX.read(e.target.result,{type:'array'}));}catch(err){rej(err)}};
+    fr.onerror=()=>rej(new Error('read fail'));
+    fr.readAsArrayBuffer(file);
+  });
+  window.__DATE1904__ = !!(wb?.Workbook?.WBProps?.date1904);
+  const all=[]; for(const name of wb.SheetNames){
+    const ws=wb.Sheets[name]; if(!ws||!ws['!ref']) continue;
+    const aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,blankrows:false});
+    all.push({name,aoa});
+  } return all;
+}
+function parseDate(v){
+  if(v==null||v==="") return "";
+  if(v instanceof Date && !isNaN(v)) return asISO(v);
+  if(typeof v === "number"){
+    if(XLSX?.SSF?.parse_date_code){
+      const dc=XLSX.SSF.parse_date_code(v,{date1904:!!window.__DATE1904__});
+      if(dc && dc.y && dc.m && dc.d) return asISO(new Date(dc.y, dc.m-1, dc.d));
+    }
+    const d=excelSerialToDate(v,!!window.__DATE1904__); return d?asISO(d):"";
+  }
+  let s=String(v).trim(); if(!s) return "";
+  s=s.replace(/\s+\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?$/i," ").trim();
+  let m=s.match(/^(\d{1,2})[-\/\s]([A-Za-z]{3,})[-\/\s](\d{2,4})$/);
+  if(m){const d=+m[1],mon=MONTH_IDX[m[2].slice(0,3).toUpperCase()]; if(mon!=null){ let y=+m[3]; if(y<100) y+=(y>=70?1900:2000); return asISO(new Date(y,mon,d)); } }
+  m=s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})$/);
+  if(m){let y=+m[3]; if(y<100) y+=(y>=70?1900:2000); return asISO(new Date(y,+m[2]-1,+m[1]));}
+  m=s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+  if(m){ return asISO(new Date(+m[1],+m[2]-1,+m[3])); }
+  return "";
+}
+
+function ingestSheet(aoa,sheetName){
+  const out=[];
+  const findRow=(label)=>{
+    const tgt=String(label).toLowerCase().replace(/\s+/g,'');
+    for(let r=0;r<aoa.length;r++){
+      if(String(aoa[r]?.[0]??'').toLowerCase().replace(/\s+/g,'')===tgt) return r;
+    }
+    return -1;
+  };
+  const rCode=findRow('Project Code'),
+        rName=findRow('Project Name'),
+        rTeam=findRow('Team'),
+        rTL=findRow('TIMELINE'),
+        rHours=findRow('HOURS'),
+        rDep=findRow('DEPLOYMENT');
+  if(rTL<0||rName<0){ return out; }
+
+  function detectBlocks(rTL){
+    const has=(cell,kw)=>String(cell||'').toLowerCase().includes(kw);
+    for(let r=rTL-3;r<=rTL+3;r++){
+      if(r<0||r>=aoa.length) continue;
+      const row=aoa[r]||[]; const bases=[];
+      for(let c=1;c<row.length-3;c++){
+        const ok=has(row[c],'start')&&(has(row[c+1],'end')||has(row[c+1],'finish'))&&has(row[c+2],'alloc')&&(has(row[c+3],'consum')||has(row[c+3],'spent'));
+        if(ok) bases.push(c);
+      }
+      if(bases.length) return {bases,headerRow:r};
+    }
+    return {bases:[],headerRow:-1};
+  }
+  const {bases}=detectBlocks(rTL); if(!bases.length) return out;
+
+  const firstNonEmpty=arr=>{for(const v of arr){ if(v!==undefined&&v!==null&&String(v).trim()!=='') return String(v).trim(); } return ''; };
+  const rHoursData=(rHours>=0&&rHours+1<aoa.length)?rHours+1:-1;
+
+  const projects=bases.map((c,idx)=>{
+    const name=clean(firstNonEmpty([aoa[rName]?.[c],aoa[rName]?.[c+1],aoa[rName]?.[c+2],aoa[rName]?.[c+3]])||`(Unnamed ${idx+1})`);
+    const code=firstNonEmpty([aoa[rCode]?.[c],aoa[rCode]?.[c+1],aoa[rCode]?.[c+2],aoa[rCode]?.[c+3]]);
+    const team=clean((rTeam>=0?firstNonEmpty([aoa[rTeam]?.[c],aoa[rTeam]?.[c+1],aoa[rTeam]?.[c+2],aoa[rTeam]?.[c+3]]):'')||sheetName||'');
+    let est,spent,bal,toFinish; const n=v=>{if(v==null||v==='')return NaN; const x=parseFloat(String(v).replace(/,/g,'')); return Number.isFinite(x)?x:NaN;};
+    if(rHoursData>=0){ est=n(aoa[rHoursData]?.[c]); spent=n(aoa[rHoursData]?.[c+1]); bal=n(aoa[rHoursData]?.[c+2]); toFinish=n(aoa[rHoursData]?.[c+3]); }
+    return {name,code:clean(code),team,hours:{est,spent,bal,toFinish}};
+  });
+
+  // One row per project
+  for(const p of projects){
+    out.push({name:p.name,code:p.code,team:p.team,est:p.hours.est,spent:p.hours.spent,balance:p.hours.bal,toFinish:p.hours.toFinish});
+  }
+  return out;
+}
+
+async function buildFromFile(){
+  const file=$('#file').files?.[0]; if(!file){alert('Select an .xlsm/.xlsx file.');return;}
+  const sheets=await readWorkbook(file);
+  projects=[];
+  for(const sh of sheets){ projects=projects.concat(ingestSheet(sh.aoa, sh.name)); }
+  renderTable();
+}
+
+function renderTable(){
+  const tb=$('#tbody');
+  if(!projects.length){ tb.innerHTML='<tr><td colspan="7" class="tiny" style="padding:16px">No data.</td></tr>'; return; }
+  // Group by project key (name)
+  const map=new Map();
+  for(const p of projects){
+    const k=keyFromName(p.name);
+    if(!map.has(k)) map.set(k,{name:p.name,codes:new Set(),teams:new Set(),est:0,spent:0,balance:0,toFinish:0});
+    const m=map.get(k);
+    if(p.code) m.codes.add(p.code);
+    if(p.team) m.teams.add(p.team);
+    if(Number.isFinite(p.est)) m.est=p.est;
+    if(Number.isFinite(p.spent)) m.spent=p.spent;
+    if(Number.isFinite(p.balance)) m.balance=p.balance;
+    if(Number.isFinite(p.toFinish)) m.toFinish=p.toFinish;
+  }
+  const rows=[...map.values()].sort((a,b)=>a.name.localeCompare(b.name));
+  const frag=document.createDocumentFragment();
+  for(const r of rows){
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td class="mono">${[...r.codes].join(' / ')||'—'}</td>
+      <td>${r.name||'—'}</td>
+      <td>${[...r.teams].join(', ')||'—'}</td>
+      <td class="mono">${Number.isFinite(r.est)?r.est:'—'}</td>
+      <td class="mono">${Number.isFinite(r.spent)?r.spent:'—'}</td>
+      <td class="mono">${Number.isFinite(r.balance)?r.balance:'—'}</td>
+      <td class="mono">${Number.isFinite(r.toFinish)?r.toFinish:'—'}</td>`;
+    frag.appendChild(tr);
+  }
+  tb.innerHTML=''; tb.appendChild(frag);
+
+  const tbl=$('#hoursTable'); makeTableResizable(tbl); applySavedColumnWidths(tbl);
+}
+
+/* Column resizer (same mechanics as Priority) */
+function colKey(t){ return `colWidths::${t.id||'hours'}`; }
+function saveW(t){ const ths=t.tHead?.rows?.[0]?.cells||[]; const arr=[...ths].map(th=>th.style.width||''); try{localStorage.setItem(colKey(t),JSON.stringify(arr));}catch{} }
+function applySavedColumnWidths(t){ let a=[]; try{a=JSON.parse(localStorage.getItem(colKey(t))||'[]')}catch{}; const ths=t.tHead?.rows?.[0]?.cells||[]; a.forEach((w,i)=>{ if(w){ setW(t,i,w); } }); }
+function setW(t,i,css){ const th=t.tHead?.rows?.[0]?.cells?.[i]; if(!th) return; th.style.width=css; const rows=t.tBodies[0]?.rows||[]; for(const r of rows){ const td=r.cells[i]; if(td) td.style.width=css; } }
+function autoSizeCol(t,i,min=48,max=640){
+  const th=t.tHead?.rows?.[0]?.cells?.[i]; if(!th) return;
+  const cells=[th,...Array.from(t.tBodies[0]?.rows||[]).map(r=>r.cells[i]).filter(Boolean)];
+  let maxW=0; for(const c of cells){ const clone=c.cloneNode(true); clone.style.width='auto'; clone.style.whiteSpace='nowrap'; clone.style.position='absolute'; clone.style.visibility='hidden'; clone.style.height='auto'; document.body.appendChild(clone); const w=clone.scrollWidth+20; document.body.removeChild(clone); if(w>maxW) maxW=w; }
+  setW(t,i,Math.max(min,Math.min(max,Math.ceil(maxW)))+'px');
+}
+function autoSizeAll(t){ const ths=t.tHead?.rows?.[0]?.cells||[]; for(let i=0;i<ths.length;i++) autoSizeCol(t,i); saveW(t); }
+function resetAllW(t){ const ths=t.tHead?.rows?.[0]?.cells||[]; for(let i=0;i<ths.length;i++) setW(t,i,''); try{localStorage.removeItem(colKey(t));}catch{} }
+function makeTableResizable(t){
+  if(!t || t.dataset.resizable!=='true') return;
+  const ths=t.tHead?.rows?.[0]?.cells||[];
+  [...ths].forEach(th=>{ const old=th.querySelector('.col-resizer'); if(old) old.remove(); th.style.position='relative'; });
+  [...ths].forEach((th,i)=>{
+    const h=document.createElement('div'); h.className='col-resizer'; th.appendChild(h);
+    let sx=0, sw=0;
+    const onMove=e=>{ const dx=e.clientX-sx; setW(t,i,Math.max(36,sw+dx)+'px'); };
+    const onUp=()=>{ document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp); saveW(t); };
+    h.addEventListener('mousedown',e=>{ e.preventDefault(); sx=e.clientX; sw=th.getBoundingClientRect().width; document.addEventListener('mousemove',onMove); document.addEventListener('mouseup',onUp); });
+    h.addEventListener('dblclick',e=>{ e.preventDefault(); autoSizeCol(t,i); saveW(t); });
+  });
+}
+
+$('#autosize').onclick=()=>autoSizeAll($('#hoursTable'));
+$('#resetW').onclick=()=>resetAllW($('#hoursTable'));
+</script>
+</body>
+</html>
